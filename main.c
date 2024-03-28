@@ -3,7 +3,7 @@
 int main() {
 	printf("Hello World");
 
-	printf("22");
-
+	//printf("22");
+	
 	return 0;
 }
