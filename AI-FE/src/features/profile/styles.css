@@ -31,10 +31,10 @@
 }
 
 .my-settings-button span {
-  font-family: "Galmuri14", sans-serif;
+  font-family: var(--font-pixel);
   font-size: 22px;
   line-height: 1;
-  color: var(--purple);
+  color: inherit;
 }
 
 .my-topbar i,
@@ -54,6 +54,17 @@
 .my-main {
   top: 56px;
   padding: 20px 0;
+  background-color: #f7f4fb;
+  background-image:
+    linear-gradient(rgb(247 244 251 / 80%), rgb(247 244 251 / 80%)),
+    url("/assets/ambient-city-v1.webp");
+  background-position:
+    center,
+    center bottom;
+  background-size:
+    100% 100%,
+    100% auto;
+  background-repeat: no-repeat, no-repeat;
 }
 
 .my-identity {
@@ -86,12 +97,12 @@
 .my-identity > .my-settings-button {
   position: absolute;
   z-index: 2;
-  top: 8px;
-  right: 8px;
+  top: 4px;
+  right: 4px;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -99,12 +110,21 @@
   color: var(--purple);
 }
 
+/* 선택 표시: 들리지 않고 바탕·아이콘이 진해진다 */
 @media (hover: hover) and (pointer: fine) {
   .my-identity > .my-settings-button:hover {
-    transform: translate(-1px, -1px);
-    background: #efe3fa;
-    box-shadow: none;
+    background: #e6dcff;
+    color: var(--purple-deep);
+    clip-path: var(--pixel-step-shape);
   }
+}
+
+.my-identity > .my-settings-button:active,
+.my-identity > .my-settings-button:focus-visible {
+  transform: none;
+  background: #d9ccff;
+  color: var(--purple-deep);
+  clip-path: var(--pixel-step-shape);
 }
 
 .my-identity-loading {
@@ -117,12 +137,14 @@
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 0;
   background: transparent;
 }
 
 .my-profile-avatar-button .person-avatar {
   display: block;
+  object-fit: cover;
+  object-position: center 32%;
 }
 
 .my-identity-loading-content {
@@ -146,7 +168,7 @@
   width: 88px;
   height: 88px;
   border: 1px solid #bda6d0;
-  border-radius: 50%;
+  border-radius: 0;
 }
 
 .my-profile-skeleton {
@@ -192,31 +214,32 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   min-width: 0;
   padding-right: 32px;
 }
 
 .my-profile-kicker {
   align-self: flex-start;
+  margin-bottom: 10px;
   padding: 2px 6px;
   border: 1px solid #d7b2cc;
   background: #f8e0ec;
   color: #705078;
-  font-family: "Galmuri11", sans-serif;
+  font-family: var(--font-pixel);
   font-size: 10px;
   letter-spacing: 0.04em;
 }
 
 .my-identity h1 {
   overflow-wrap: anywhere;
-  margin: 0;
+  margin: 0 0 2px;
   font-size: 18px;
   line-height: 1.35;
 }
 
 .my-identity .my-profile-age {
-  margin: 0;
+  margin: 0 0 10px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -227,7 +250,7 @@
   gap: 5px;
   width: fit-content;
   max-width: 100%;
-  margin: 3px 0 0;
+  margin: 0;
   padding: 4px 7px;
   border: 1px solid #dfcfaa;
   background: #fff9eb;
@@ -300,11 +323,11 @@
 
 .settings-kicker {
   color: #705078;
-  font-family: "Galmuri11", sans-serif;
+  font-family: var(--font-pixel);
   font-size: 11px;
 }
 
-.settings-intro h1 {
+.settings-intro h2 {
   margin: 7px 0 4px;
   font-size: 21px;
 }
@@ -333,6 +356,11 @@
   text-align: left;
 }
 
+.settings-action:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .settings-action:hover {
     transform: translate(-1px, -1px);
@@ -356,7 +384,7 @@
   background: #f4ebff;
   box-shadow: inset -3px -3px 0 #e3d2f4;
   color: var(--purple);
-  font-family: "Galmuri14", sans-serif;
+  font-family: var(--font-pixel);
   font-size: 23px;
   line-height: 1;
 }
@@ -364,6 +392,11 @@
 .logout-action-icon {
   background: #fbe3f0;
   color: #9e315f;
+}
+
+.withdrawal-action-icon {
+  background: #ffe1e5;
+  color: #a1223e;
 }
 
 .settings-action-copy {
@@ -391,7 +424,8 @@
   line-height: 1;
 }
 
-.settings-logout {
+.settings-logout,
+.settings-withdrawal {
   border-color: #7f305b;
   background: #fffafd;
 }
@@ -401,11 +435,13 @@
   font-weight: 500;
 }
 
-.settings-logout .settings-action-copy strong {
+.settings-logout .settings-action-copy strong,
+.settings-withdrawal .settings-action-copy strong {
   color: #8d2b56;
 }
 
-.settings-logout-confirm {
+.settings-logout-confirm,
+.settings-withdrawal-confirm {
   min-width: 0;
   margin: 0;
   padding: 16px;
@@ -414,15 +450,18 @@
   box-shadow: 3px 4px 0 #8758cf26;
 }
 
-.settings-logout-confirm legend {
+.settings-logout-confirm legend,
+.settings-withdrawal-confirm legend {
   padding: 0;
   font-size: 14px;
 }
 
-.settings-logout-confirm > p {
+.settings-logout-confirm > p,
+.settings-withdrawal-confirm > p {
   margin: 6px 0 14px;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.6;
 }
 
 .settings-confirm-actions {
@@ -445,6 +484,11 @@
 
 .settings-confirm-submit {
   background: #f6bde2;
+}
+
+.settings-withdrawal-submit {
+  background: #9e315f;
+  color: #fff;
 }
 
 .settings-confirm-actions button:disabled {
@@ -591,7 +635,7 @@
   height: 72px;
 }
 
-.persona-hero h1 {
+.persona-hero h2 {
   font-size: 18px;
   margin: 16px 0 10px;
 }
@@ -623,4 +667,324 @@
   display: block;
   color: var(--muted);
   margin: 24px 0;
+}
+
+/* 플레이어 카드: MY PLAYER CARD 칩과 지역 칩의 높이를 같게 (28px, 글자 세로 가운데) */
+.my-identity-copy .my-profile-kicker,
+.my-identity-copy .my-profile-region {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1;
+}
+
+/* 플레이어 카드: 사진 + 글자 묶음을 오른쪽으로 4px, 글자는 사진에서 22px 띄움 */
+.my-main .my-identity {
+  gap: 18px;
+  margin: 2px 18px 24px;
+  padding: 20px 12px;
+  filter: drop-shadow(0 3px 0 rgb(124 92 250 / 8%));
+}
+
+/* 마이 메뉴: AI 아바타(30px)와 다른 아이콘 칸 너비를 같게 해 글자 시작 위치 정렬 */
+.my-menu button > .icon,
+.my-menu button > .menu-glyph {
+  width: 30px;
+  object-fit: contain;
+}
+
+.job-category-control {
+  position: relative;
+}
+
+.job-category-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 32px 8px 10px;
+  appearance: none;
+  border: 6px solid transparent;
+  border-image: var(--px-frame) 6 fill / 6px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.job-category-select.has-value {
+  color: var(--ink);
+}
+
+.job-category-select:focus-visible {
+  outline: none;
+  border-image-source: var(--px-frame-focus);
+  filter: drop-shadow(0 3px 0 rgb(124 92 250 / 18%));
+}
+
+.job-category-select[aria-invalid="true"] {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.job-category-select:disabled {
+  opacity: 0.54;
+  cursor: not-allowed;
+}
+
+.job-category-select option {
+  background: var(--paper, #fff);
+  color: var(--ink);
+}
+
+.job-category-arrow {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  display: flex;
+  color: var(--purple);
+  pointer-events: none;
+  transform: translateY(-50%) rotate(90deg);
+}
+
+/* Compact account screens keep profile details within a comfortable reading width. */
+.screen-header.account-header {
+  height: calc(54px + env(safe-area-inset-top, 0px));
+  min-height: calc(54px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0) 12px 0;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  background: rgb(253 251 255 / 94%);
+}
+
+.screen-header.account-header h1 {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.main-scroll.settings-main,
+.main-scroll.edit-main,
+.main-scroll.persona-main {
+  top: calc(54px + env(safe-area-inset-top, 0px));
+  padding: 22px 20px max(28px, env(safe-area-inset-bottom, 0px));
+  scroll-padding-top: 20px;
+}
+
+.my-main .my-identity::before {
+  display: none;
+}
+
+.my-main .my-identity-copy {
+  padding-right: 22px;
+}
+
+.my-main .my-profile-kicker {
+  height: auto;
+  margin-bottom: 8px;
+  padding: 2px 0;
+  border: 0;
+  border-image: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.my-main .my-identity h1 {
+  font-size: 21px;
+  line-height: 1.4;
+}
+
+.my-main .my-profile-region {
+  height: auto;
+  min-height: 28px;
+  padding: 2px 5px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.my-main .my-menu {
+  margin: 0 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 82%);
+  overflow: hidden;
+}
+
+.my-main .my-menu button {
+  min-height: 64px;
+  padding: 12px 14px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.settings-main .settings-confirm-actions button {
+  min-height: 44px;
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+.my-main .my-menu button:first-child {
+  border-top: 0;
+}
+
+.my-main .my-menu button:last-child {
+  border-bottom: 0;
+}
+
+.settings-main .settings-intro {
+  margin: 0 0 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.settings-main .settings-intro h2 {
+  font-size: 21px;
+  line-height: 1.5;
+}
+
+.settings-main .settings-intro p,
+.settings-main .settings-action-copy small {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.settings-main .settings-action {
+  min-height: 82px;
+  gap: 12px;
+  padding: 12px 10px;
+  filter: none;
+}
+
+.settings-main .settings-action-copy strong {
+  font-size: 15px;
+}
+
+.settings-main .settings-action-icon {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-image: none;
+  border-radius: 10px;
+  background: var(--soft-lavender);
+  font-size: 21px;
+}
+
+.edit-main .edit-photo-section {
+  margin-bottom: 26px;
+  padding: 14px 10px;
+  filter: none;
+}
+
+.edit-main .edit-photo-section > p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.edit-main .field {
+  margin-bottom: 22px;
+}
+
+.edit-main .field-label {
+  font-weight: 700;
+}
+
+.edit-main .edit-actions {
+  margin: 24px 0 0;
+}
+
+.persona-main .persona-hero {
+  padding: 24px 16px;
+  filter: none;
+}
+
+.persona-main .persona-hero h2 {
+  margin-top: 16px;
+  font-size: 20px;
+}
+
+.persona-main .persona-hero p {
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.persona-main .persona-trait {
+  padding-block: 18px;
+}
+
+.persona-main .persona-trait span {
+  font-size: 12px;
+}
+
+.persona-main .persona-trait strong {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+@media (width <= 350px) {
+  .main-scroll.settings-main,
+  .main-scroll.edit-main,
+  .main-scroll.persona-main {
+    padding-inline: 16px;
+  }
+
+  .my-main .my-identity {
+    gap: 12px;
+    margin-inline: 12px;
+  }
+
+  .my-main .my-profile-avatar-button .person-avatar.large {
+    width: 72px;
+    height: 84px;
+  }
+
+  .my-main .my-menu {
+    margin-inline: 12px;
+  }
+}
+
+.persona-main .persona-status {
+  margin: 28px 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.persona-main .persona-summary-status {
+  margin-top: 24px;
+  padding: 20px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 80%);
+}
+
+.persona-main .persona-completion-label {
+  color: var(--purple-deep);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.persona-main .persona-summary-status h2 {
+  margin: 10px 0;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.persona-main .persona-summary-status p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+  word-break: keep-all;
+}
+
+.persona-main .empty-state {
+  padding-inline: 0;
+}
+
+.persona-main .empty-state h2 {
+  font-size: 17px;
 }
