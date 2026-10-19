@@ -1,0 +1,76 @@
+export const initialRecommendationFeedState = {
+  recommendations: [],
+  currentIndex: 0,
+  exhausted: false,
+};
+
+export function recommendationFeedReducer(state, action) {
+  switch (action.type) {
+    case "replace":
+      return {
+        recommendations: action.items,
+        currentIndex: 0,
+        exhausted: false,
+      };
+    case "append":
+      if (action.items.length === 0) return state;
+      return {
+        ...state,
+        recommendations: [...state.recommendations, ...action.items],
+        exhausted: false,
+      };
+    case "revalidate": {
+      const currentUserId =
+        state.recommendations[state.currentIndex]?.id ?? null;
+      const matchingIndex = action.items.findIndex(
+        (item) => item.id === currentUserId,
+      );
+      const currentIndex =
+        matchingIndex >= 0
+          ? matchingIndex
+          : Math.min(state.currentIndex, Math.max(action.items.length - 1, 0));
+      return {
+        recommendations: action.items,
+        currentIndex,
+        exhausted: action.items.length === 0,
+      };
+    }
+    case "advance":
+      return { ...state, currentIndex: state.currentIndex + 1 };
+    case "retreat":
+      return {
+        ...state,
+        currentIndex: Math.max(state.currentIndex - 1, 0),
+      };
+    case "dismiss": {
+      const dismissedIndex =
+        action.userId == null
+          ? state.currentIndex
+          : state.recommendations.findIndex(
+              (item) => item.id === action.userId,
+            );
+      if (dismissedIndex < 0 || dismissedIndex >= state.recommendations.length)
+        return state;
+
+      const recommendations = state.recommendations.filter(
+        (_, index) => index !== dismissedIndex,
+      );
+      if (recommendations.length === 0) {
+        return { recommendations, currentIndex: 0, exhausted: true };
+      }
+
+      return {
+        recommendations,
+        currentIndex: Math.min(
+          dismissedIndex < state.currentIndex
+            ? state.currentIndex - 1
+            : state.currentIndex,
+          recommendations.length - 1,
+        ),
+        exhausted: false,
+      };
+    }
+    default:
+      return state;
+  }
+}

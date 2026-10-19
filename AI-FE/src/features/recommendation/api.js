@@ -1,0 +1,22 @@
+import { apiRequest } from "../../shared/api/client.js";
+
+export const saveRecommendationPass = (targetUserId) =>
+  apiRequest(
+    `/api/v1/users/me/recommendation-passes/${encodeURIComponent(targetUserId)}`,
+    { method: "PUT" },
+  );
+
+export const createRecommendationBatch = () =>
+  apiRequest("/api/v1/recommendation-batches", { method: "POST" });
+
+export const activeBatch = () =>
+  apiRequest("/api/v1/recommendation-batches/active", { cache: "no-store" });
+
+export const recommendationItems = (batchId, cursor) => {
+  const params = new URLSearchParams();
+  if (cursor != null) params.set("cursor", String(cursor));
+  const query = params.size ? `?${params.toString()}` : "";
+  return apiRequest(`/api/v1/recommendation-batches/${batchId}/items${query}`, {
+    cache: "no-store",
+  });
+};

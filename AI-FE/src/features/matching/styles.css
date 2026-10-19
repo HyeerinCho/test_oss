@@ -1,0 +1,138 @@
+.likes-main {
+  top: 104px;
+  padding: 12px 16px 24px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.section-heading h1 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.section-heading span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.like-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.like-card {
+  border: 1px solid #d8c5e7;
+  box-shadow: 3px 4px 0 #8758cf46;
+  padding: 15px 14px;
+  background: var(--paper);
+}
+
+.person-avatar {
+  border: 1px solid #bda6d0;
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  flex: none;
+  background: #e8d9fb;
+  color: var(--purple);
+  font-size: 26px;
+}
+
+.person-avatar.large {
+  width: 88px;
+  height: 88px;
+  border-radius: 0;
+  clip-path: var(--pixel-step-shape);
+}
+
+.person-avatar.generated {
+  box-shadow:
+    inset 5px 5px 0 #f9e5ff,
+    inset -5px -5px 0 #c99fe8;
+}
+
+.like-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.like-actions .pixel-button {
+  min-height: 44px;
+  padding: 7px;
+}
+
+.like-confirm-dialog {
+  width: min(calc(100% - 32px), 360px);
+  margin: auto;
+  padding: 24px 20px 18px;
+  border: 2px solid var(--line);
+  background: var(--paper);
+  box-shadow: 5px 6px 0 #27103f80;
+  text-align: center;
+  border-radius: 12px;
+}
+
+.like-confirm-dialog h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.like-confirm-dialog p {
+  margin: 12px 0 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.like-confirm-dialog > div {
+  display: flex;
+  gap: 8px;
+}
+
+.like-confirm-dialog button {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  min-height: 46px;
+}
+
+.like-confirm-dialog button.is-primary {
+  background: var(--pink);
+}
+
+/* Chat and AI */
+
+.likes-main .like-list {
+  gap: 14px;
+}
+
+.likes-main .like-card {
+  padding: 14px 12px;
+  filter: drop-shadow(0 3px 0 rgb(124 92 250 / 7%));
+}
+
+.likes-main .like-actions {
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.likes-main .like-actions .pixel-button {
+  min-height: 46px;
+  font-size: 13px;
+}
+
+.like-confirm-dialog::backdrop {
+  background: rgb(36 24 51 / 48%);
+  backdrop-filter: blur(3px);
+}

@@ -1,0 +1,80 @@
+import { getAuthSessionSubject } from "../../shared/api/authToken.js";
+import { apiRequest } from "../../shared/api/client.js";
+import { uploadFile } from "../../shared/api/files.js";
+import { createMessageId } from "../../shared/messageId.js";
+import { CHAT_READ_UPDATED_EVENT } from "./unreadCount.js";
+
+export const rooms = ({ cursor, size = 20, signal } = {}) => {
+  const params = new URLSearchParams({ size: String(size) });
+  if (cursor) params.set("cursor", cursor);
+  return apiRequest(`/api/v1/chat-rooms?${params.toString()}`, {
+    signal,
+    cache: "no-store",
+  });
+};
+
+export const messages = (roomId, { cursor, size = 20, signal } = {}) => {
+  const params = new URLSearchParams({ size: String(size) });
+  if (cursor) params.set("cursor", String(cursor));
+  return apiRequest(`/api/v1/chat-rooms/${roomId}/messages?${params}`, {
+    signal,
+    cache: "no-store",
+  });
+};
+
+export const markAsRead = async (roomId, lastReadMessageId) => {
+  const subject = getAuthSessionSubject();
+  const result = await apiRequest(`/api/v1/chat-rooms/${roomId}/read`, {
+    method: "POST",
+    body: { lastReadMessageId },
+  });
+  if (subject && subject === getAuthSessionSubject())
+    window.dispatchEvent(new Event(CHAT_READ_UPDATED_EVENT));
+  return result;
+};
+
+export const sendMessage = (
+  roomId,
+  text,
+  clientMessageId = createMessageId(),
+) =>
+  apiRequest(`/api/v1/chat-rooms/${roomId}/messages`, {
+    method: "POST",
+    body: {
+      clientMessageId,
+      messageType: "TEXT",
+      textContent: text,
+    },
+  });
+
+export const sendImageMessage = (
+  roomId,
+  imageFileId,
+  clientMessageId = createMessageId(),
+) =>
+  apiRequest(`/api/v1/chat-rooms/${roomId}/messages`, {
+    method: "POST",
+    body: {
+      clientMessageId,
+      messageType: "IMAGE",
+      imageFileId,
+    },
+  });
+
+export const chatImageAccessUrl = (roomId, fileId) =>
+  apiRequest(`/api/v1/chat-rooms/${roomId}/images/${fileId}/access-url`);
+
+export const blockUser = (targetUserId, { signal } = {}) =>
+  apiRequest(`/api/v1/users/me/blocks/${targetUserId}`, {
+    method: "PUT",
+    signal,
+  });
+
+export const leaveChatRoom = (chatRoomId, { signal } = {}) =>
+  apiRequest(`/api/v1/chat-rooms/${chatRoomId}/leave`, {
+    method: "POST",
+    signal,
+    cache: "no-store",
+  });
+
+export const uploadChatImage = uploadFile;

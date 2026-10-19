@@ -1,0 +1,35 @@
+/* Avoid iOS Safari zooming the viewport when a small text field is focused. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* Preserve state changes while removing movement and looping motion. */
+@media (prefers-reduced-motion: reduce) {
+  .skip-link {
+    transition: none;
+  }
+
+  button:active:not(:disabled),
+  .pixel-button:active:not(:disabled),
+  .bottom-nav a:active {
+    transform: none;
+  }
+
+  .onboarding-page .onboarding-action .pixel-button:active:not(:disabled) {
+    transform: none;
+    filter: none;
+  }
+
+  .recommendation-card-current.is-settling {
+    transition: none;
+  }
+
+  .my-profile-skeleton,
+  .my-profile-skeleton-avatar {
+    animation: none;
+  }
+}

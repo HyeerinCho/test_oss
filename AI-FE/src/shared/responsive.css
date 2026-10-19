@@ -1,0 +1,181 @@
+/* Layout dimensions include the safe area exactly once. */
+.home-main,
+.chat-list-main,
+.my-main,
+.report-main,
+.ai-screen-state-main,
+.settings-main,
+.edit-main,
+.persona-main {
+  top: var(--header-height);
+}
+
+.segmented-tabs.likes-seg {
+  height: 42px;
+  min-height: 42px;
+  margin: 0 16px;
+  padding: 3px;
+}
+
+.segmented-tabs.likes-seg + .likes-main {
+  top: calc(var(--header-height) + 90px);
+}
+
+.likes-main > .empty-state {
+  min-height: 100%;
+  margin-top: 0;
+}
+
+.app-screen[data-has-nav="true"] .main-scroll {
+  bottom: var(--nav-height);
+}
+
+.bottom-nav a {
+  min-height: 44px;
+  font-weight: 700;
+  gap: 3px;
+}
+
+.bottom-nav-icon {
+  display: grid;
+  min-width: 44px;
+  min-height: 28px;
+  place-items: center;
+}
+
+.bottom-nav a.active .bottom-nav-icon {
+  background: var(--soft-lavender);
+  clip-path: var(--pixel-step-shape);
+}
+
+.toast {
+  top: calc(16px + env(safe-area-inset-top, 0px));
+}
+
+.toast.toast-home {
+  top: calc(var(--header-height) + 12px);
+}
+
+.simulation-footer {
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+}
+
+.like-confirm-dialog,
+.practice-dialog,
+.settings-logout-confirm,
+.settings-withdrawal-confirm,
+.chat-confirm-dialog {
+  max-height: calc(var(--app-viewport-height, 100dvh) - 48px);
+  overflow-y: auto;
+}
+
+.preference-sheet {
+  max-width: min(100%, 480px);
+  max-height: calc(var(--app-viewport-height, 100dvh) - 24px);
+}
+
+.simulation-participants > div > span {
+  flex: 1;
+}
+
+.simulation-participants > div,
+.simulation-participants > div > span,
+.notification-open > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.persona-summary-card,
+.kakao-file-name,
+.report-main {
+  overflow-wrap: anywhere;
+}
+
+@media (width >= 600px) {
+  .app-shell {
+    align-items: center;
+    padding: 24px;
+    background: linear-gradient(160deg, #eee8f6, #faf5f9 65%, #eae3f2);
+  }
+
+  .app-screen {
+    height: min(960px, calc(var(--app-viewport-height, 100dvh) - 48px));
+    min-height: 0;
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    box-shadow: 0 12px 50px rgb(57 32 82 / 10%);
+  }
+
+  .main-scroll,
+  .chat-room-view .chat-messages,
+  .practice-messages {
+    scrollbar-width: thin;
+    scrollbar-color: #d2c4e3 transparent;
+  }
+
+  .chat-room-view .chat-room-messages::-webkit-scrollbar {
+    display: block;
+    width: 5px;
+  }
+
+  .chat-room-view .chat-room-messages::-webkit-scrollbar-thumb {
+    background: #d2c4e3;
+  }
+}
+
+@media (width < 600px) {
+  .app-screen {
+    max-width: none;
+    box-shadow: none;
+  }
+}
+
+@media (height < 600px) {
+  .app-shell {
+    padding-block: 0;
+  }
+
+  .app-screen {
+    height: var(--app-viewport-height, 100dvh);
+    border-radius: 0;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .app-screen
+    :is(
+      input:not([type="checkbox"], [type="radio"], [type="range"]),
+      textarea,
+      select
+    ) {
+    font-size: 16px;
+  }
+
+  .app-shell[data-short-viewport]
+    .onboarding-step-questions
+    :is(.onboarding-brand, .onboarding-top, .onboarding-eyebrow) {
+    display: none;
+  }
+
+  .app-shell[data-short-viewport] .onboarding-step-questions .onboarding-body {
+    padding-top: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: Honor the OS accessibility preference over feature animations. */
+    animation-duration: 0.01ms !important;
+
+    /* biome-ignore lint/complexity/noImportantStyles: Stop repeating decorative animations in reduced motion mode. */
+    animation-iteration-count: 1 !important;
+
+    /* biome-ignore lint/complexity/noImportantStyles: Honor reduced motion across all interactive states. */
+    transition-duration: 0.01ms !important;
+
+    /* biome-ignore lint/complexity/noImportantStyles: Disable feature-level smooth scrolling for reduced motion. */
+    scroll-behavior: auto !important;
+  }
+}
