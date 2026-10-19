@@ -1,0 +1,356 @@
+"""DB 접근. service.py는 SQLAlchemy를 직접 만지지 않는다."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from sqlalchemy import select, update
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from .models import OnboardingSession, OnboardingTurn, PersonaRecord
+
+# Postgres lock_not_available — FOR UPDATE NOWAIT 가 이미 잠긴 행을 만났을 때
+_LOCK_NOT_AVAILABLE = "55P03"
+
+
+class SessionBusy(Exception):
+    """같은 온보딩 세션의 다른 요청(더블클릭·재전송)을 지금 처리 중이다."""
+
+
+def _sqlstate(e: DBAPIError) -> str | None:
+    orig = e.orig
+    return getattr(orig, "sqlstate", None) or getattr(getattr(orig, "__cause__", None), "sqlstate", None)
+
+
+class PersonaRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    # ── 세션 ──────────────────────────────────────────────
+
+    async def update_nickname(self, user_id: str, nickname: str) -> int:
+        """해당 user_id의 모든 온보딩 세션의 닉네임을 변경한다. 변경된 행 수를 반환한다."""
+        stmt = (
+            update(OnboardingSession)
+            .where(OnboardingSession.user_id == user_id)
+            .values(nickname=nickname, updated_at=datetime.now(UTC))
+        )
+        res = await self.db.execute(stmt)
+        await self.db.flush()
+        return res.rowcount
+
+    async def create_session(
+        self, nickname: str, total_turns: int, user_id: str, mbti: str | None = None
+    ) -> OnboardingSession:
+        session = OnboardingSession(
+            nickname=nickname,
+            total_turns=total_turns,
+            user_id=user_id,
+            mbti=mbti,
+            used_topic_ids=[],
+            coverage={"primary": {}, "secondary": {}},
+            # 비워서라도 넣어야 한다 — 생성 직후 service._history() 가 turns 를 읽는데,
+            # 초기화 안 된 컬렉션은 lazy load 를 타고 async 세션에서 MissingGreenlet 이 난다
+            turns=[],
+        )
+        self.db.add(session)
+        await self.db.flush()
+        return session
+
+    async def get_session(self, session_id: str) -> OnboardingSession | None:
+        stmt = (
+            select(OnboardingSession)
+            .where(OnboardingSession.id == session_id)
+            .options(selectinload(OnboardingSession.turns))
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def lock_session(self, session_id: str) -> OnboardingSession | None:
+        """답변·건너뛰기·끝내기용. 세션 행을 잠그되 이미 잠겨 있으면 기다리지 않고 SessionBusy.
+
+        처리 중에 같은 세션으로 또 들어온 요청은 기다렸다 처리하면 다음 질문의 답으로 잘못 들어가므로 바로 돌려보낸다.
+        DB 잠금이라 워커가 여러 개여도 막힌다. (SQLite 는 FOR UPDATE 를 무시한다 — 테스트에서는 잠금 없음)"""
+        stmt = (
+            select(OnboardingSession)
+            .where(OnboardingSession.id == session_id)
+            .options(selectinload(OnboardingSession.turns))
+            .with_for_update(nowait=True)
+        )
+        try:
+            return (await self.db.execute(stmt)).scalar_one_or_none()
+        except DBAPIError as e:
+            if _sqlstate(e) == _LOCK_NOT_AVAILABLE:
+                await self.db.rollback()
+                raise SessionBusy(session_id) from e
+            raise
+
+    async def get_session_for_update(self, session_id: str) -> OnboardingSession | None:
+        """동일 세션의 동시 build가 같은 version을 만들지 못하도록 세션 행을 잠근다."""
+        stmt = (
+            select(OnboardingSession)
+            .where(OnboardingSession.id == session_id)
+            .options(selectinload(OnboardingSession.turns))
+            .with_for_update()
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    # ── 턴 ────────────────────────────────────────────────
+
+    async def add_question(
+        self,
+        session: OnboardingSession,
+        topic_id: str,
+        question: str,
+        source: str,
+    ) -> OnboardingTurn:
+        turn = OnboardingTurn(
+            session_id=session.id,
+            turn_index=session.turn_index,
+            topic_id=topic_id,
+            question=question,
+            question_source=source,
+        )
+        self.db.add(turn)
+
+        session.pending_topic_id = topic_id
+        # JSON 컬럼은 리스트를 새로 할당해야 변경이 감지된다
+        session.used_topic_ids = [*session.used_topic_ids, topic_id]
+
+        await self.db.flush()
+        return turn
+
+    async def record_answer(
+        self,
+        session: OnboardingSession,
+        answer: str,
+        tags: dict | None,
+        coverage: dict,
+    ) -> None:
+        stmt = select(OnboardingTurn).where(
+            OnboardingTurn.session_id == session.id,
+            OnboardingTurn.turn_index == session.turn_index,
+        )
+        turn = (await self.db.execute(stmt)).scalar_one()
+        turn.answer = answer
+        turn.tags = tags
+
+        session.turn_index += 1
+        session.pending_topic_id = None
+        session.coverage = coverage  # 통째로 재할당
+
+        await self.db.flush()
+
+    async def mark_reasked(self, session: OnboardingSession) -> None:
+        """대기 중인 질문을 한 번 되물었다고 표시한다. 답이 오기 전의 tags 칸을 쓴다 — record_answer 가 덮어쓴다."""
+        session.turns[-1].tags = {"reasked": True}
+        await self.db.flush()
+
+    async def skip_question(self, session: OnboardingSession) -> None:
+        """대기 중인 질문을 답 없이 넘긴다. 턴은 소비되고 커버리지는 그대로."""
+        stmt = select(OnboardingTurn).where(
+            OnboardingTurn.session_id == session.id,
+            OnboardingTurn.turn_index == session.turn_index,
+        )
+        turn = (await self.db.execute(stmt)).scalar_one()
+        turn.skipped = True
+
+        session.turn_index += 1
+        session.pending_topic_id = None
+        await self.db.flush()
+
+    async def finish_early(self, session: OnboardingSession) -> None:
+        """남은 질문을 포기하고 대화를 닫는다. 대기 중인 질문이 있으면 건너뛴 것으로."""
+        if session.pending_topic_id is not None:
+            await self.skip_question(session)
+        # total_turns 를 지금까지로 줄이면 is_done 판정과 진행 표시가 자연히 맞는다
+        session.total_turns = session.turn_index
+        await self.db.flush()
+
+    async def add_supplement(
+        self,
+        session: OnboardingSession,
+        dimension: str,
+        question: str,
+        answer: str,
+        coverage: dict,
+    ) -> OnboardingTurn:
+        """보강 문답 한 건. 온보딩 턴 뒤에 이어 붙고, 진행 카운터는 건드리지 않는다."""
+        turn = OnboardingTurn(
+            session_id=session.id,
+            turn_index=len(session.turns),
+            topic_id=f"supplement:{dimension}",
+            question=question,
+            answer=answer,
+            question_source="bank",
+        )
+        session.turns.append(turn)
+        session.coverage = coverage
+        await self.db.flush()
+        return turn
+
+    # ── 페르소나 ──────────────────────────────────────────
+
+    async def latest_persona(self, session_id: str) -> PersonaRecord | None:
+        stmt = (
+            select(PersonaRecord)
+            .where(PersonaRecord.session_id == session_id)
+            .order_by(PersonaRecord.version.desc())
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def get_persona(self, persona_id: str) -> PersonaRecord | None:
+        return await self.db.get(PersonaRecord, persona_id)
+
+    async def get_persona_for_update(self, persona_id: str) -> PersonaRecord | None:
+        """확정 요청끼리 같은 초안을 동시에 갱신하지 못하도록 행 잠금으로 조회한다."""
+        stmt = select(PersonaRecord).where(PersonaRecord.id == persona_id).with_for_update()
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def latest_confirmed_persona(self, session_id: str) -> PersonaRecord | None:
+        stmt = (
+            select(PersonaRecord)
+            .where(PersonaRecord.session_id == session_id, PersonaRecord.is_confirmed.is_(True))
+            .order_by(PersonaRecord.confirmed_at.desc(), PersonaRecord.version.desc())
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def latest_persona_for_user(self, user_id: str) -> PersonaRecord | None:
+        """그 사용자가 마지막으로 확정한 페르소나. 미확정 초안은 노출하지 않는다."""
+        stmt = (
+            select(PersonaRecord)
+            .where(PersonaRecord.user_id == user_id, PersonaRecord.is_confirmed.is_(True))
+            .order_by(PersonaRecord.confirmed_at.desc(), PersonaRecord.created_at.desc())
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def save_confirmation(
+        self,
+        record: PersonaRecord,
+        mbti: str,
+        confirmed_at: datetime,
+    ) -> PersonaRecord:
+        """확정 상태와 MBTI를 같은 페르소나 행에 저장한다."""
+        record.is_confirmed = True
+        record.confirmed_at = confirmed_at
+        record.mbti = mbti
+
+        await self.db.flush()
+        return record
+
+    async def get_session_brief(self, session_id: str) -> OnboardingSession | None:
+        """turns 를 안 싣는 가벼운 조회. 닉네임만 필요할 때 (simulation·practice)."""
+        return await self.db.get(OnboardingSession, session_id)
+
+    async def latest_before(self, record: PersonaRecord) -> PersonaRecord | None:
+        if record.previous_id is None:
+            return None
+        return await self.db.get(PersonaRecord, record.previous_id)
+
+    async def save_persona(
+        self,
+        session: OnboardingSession,
+        scores: dict,
+        texts: dict,
+        confidence: dict,
+        narrative: dict | None = None,
+        summaries: list[dict] | None = None,
+        source: str = "llm",
+    ) -> tuple[PersonaRecord, PersonaRecord | None]:
+        """새 버전을 추가한다. (새 행, 직전 행) — 직전 행은 변화 계산용."""
+        previous = await self.latest_persona(session.id)
+        record = PersonaRecord(
+            session_id=session.id,
+            user_id=session.user_id,
+            scores=scores,
+            texts=texts,
+            confidence=confidence,
+            narrative=narrative,
+            summaries=summaries,
+            version=(previous.version + 1) if previous else 1,
+            previous_id=previous.id if previous else None,
+            is_confirmed=False,
+            confirmed_at=None,
+            mbti=None,
+            source=source,
+        )
+        self.db.add(record)
+        session.status = "completed"
+        await self.db.flush()
+        return record, previous
+
+    async def save_extracted_version(
+        self,
+        base: PersonaRecord,
+        *,
+        source: str,
+        scores: dict,
+        confidence: dict,
+        narrative: dict | None,
+        conversation_style: dict,
+    ) -> PersonaRecord:
+        """실제 대화 추출 버전을 확정 상태로 추가한다 (사용자 확인 없이 — 2026-10-05 결정).
+
+        관심사·카드·MBTI 는 base 그대로. version 은 같은 온보딩 세션의 최신(미확정 초안 포함) 다음 번호,
+        previous_id 는 base — "무엇을 고쳐서 만들었나"를 가리킨다."""
+        latest = await self.latest_persona(base.session_id)
+        record = PersonaRecord(
+            session_id=base.session_id,
+            user_id=base.user_id,
+            scores=scores,
+            texts=base.texts,
+            confidence=confidence,
+            narrative=narrative,
+            summaries=base.summaries,
+            conversation_style=conversation_style,
+            version=(latest.version if latest else base.version) + 1,
+            previous_id=base.id,
+            is_confirmed=True,
+            confirmed_at=datetime.now(UTC),
+            mbti=base.mbti,
+            source=source,
+        )
+        self.db.add(record)
+        await self.db.flush()
+        return record
+
+    async def base_onboarding_persona(self, session_id: str) -> PersonaRecord | None:
+        """대화 추출이 적용되기 전 최초 온보딩 확정 페르소나 (점수·신뢰도 복원용)."""
+        stmt = (
+            select(PersonaRecord)
+            .where(
+                PersonaRecord.session_id == session_id,
+                PersonaRecord.is_confirmed.is_(True),
+                PersonaRecord.source.in_(("llm", "fallback")),
+            )
+            .order_by(PersonaRecord.version.asc())
+            .limit(1)
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def save_reset_version(self, base: PersonaRecord, original: PersonaRecord) -> PersonaRecord:
+        """대화 스타일을 제거하고 온보딩 원래 점수로 복원한 확정 버전을 추가한다 (2026-10-08)."""
+        latest = await self.latest_persona(base.session_id)
+        record = PersonaRecord(
+            session_id=base.session_id,
+            user_id=base.user_id,
+            scores=original.scores,
+            texts=base.texts,
+            confidence=original.confidence,
+            narrative=original.narrative,
+            summaries=base.summaries,
+            conversation_style=None,
+            version=(latest.version if latest else base.version) + 1,
+            previous_id=base.id,
+            is_confirmed=True,
+            confirmed_at=datetime.now(UTC),
+            mbti=base.mbti,
+            source="reset",
+        )
+        self.db.add(record)
+        await self.db.flush()
+        return record

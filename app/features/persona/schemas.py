@@ -1,0 +1,760 @@
+"""도메인 정의 + API 입출력 모델.
+
+차원과 주제를 여기 한 곳에 둔다. agents.py의 프롬프트는
+이 정의에서 자동 생성되므로 차원을 추가할 때 프롬프트를 따로 고치지 않는다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import IntEnum
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+from app.core.guardrail import ValidationResult
+
+# ══ 차원 정의 ══════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class Dimension:
+    area: str
+    label: str
+    low: str = ""
+    high: str = ""
+
+
+SCORED: dict[str, Dimension] = {
+    "avoidance": Dimension(
+        area="intimacy",
+        label="거리 두기",
+        low="웬만한 건 공유하고 함께 있는 시간을 선호",
+        high="각자 생활을 중시하고 독립적 거리를 유지",
+    ),
+    "anxiety": Dimension(
+        area="intimacy",
+        label="관계 불안",
+        low="상대 반응이 늦어도 크게 동요하지 않음",
+        high="반응이 미지근하면 관계를 의심하고 신경 쓰임",
+    ),
+    "disclosure": Dimension(
+        area="communication",
+        label="자기·감정 표현",
+        low="속내를 잘 꺼내지 않음",
+        high="느낀 것을 말로 표현하는 편",
+    ),
+    "openness": Dimension(
+        area="communication",
+        label="솔직한 관계 대화",
+        low="관계에 대한 얘기를 꺼내는 걸 부담스러워함",
+        high="'우리 어떤지' 같은 얘기를 먼저 꺼냄",
+    ),
+    "positivity": Dimension(
+        area="communication",
+        label="긍정적 상호작용",
+        low="무덤덤하고 건조한 톤",
+        high="밝고 다정한 표현이 잦음",
+    ),
+    "assurances": Dimension(
+        area="communication",
+        label="관계 확신 표현",
+        low="미래나 마음을 말로 잘 표현하지 않음",
+        high="'오래 보자' 같은 말을 먼저 함",
+    ),
+    "contact_rhythm": Dimension(
+        area="communication",
+        label="연락 빈도",
+        low="할 말 있을 때만 연락",
+        high="하루 종일 수시로 주고받기",
+    ),
+    "problem_solving": Dimension(
+        area="conflict",
+        label="문제 해결",
+        low="갈등을 덮거나 흐지부지 넘김",
+        high="원인을 짚고 중간 지점을 찾음",
+    ),
+    "withdrawal": Dimension(
+        area="conflict",
+        label="회피·철수",
+        low="그 자리에서 계속 대화",
+        high="입을 닫거나 자리를 뜸",
+    ),
+    "engagement": Dimension(
+        area="conflict",
+        label="감정적 맞대응",
+        low="감정을 올리지 않음",
+        high="목소리가 커지거나 쏘아붙임",
+    ),
+    "compliance": Dimension(
+        area="conflict",
+        label="일방적 수용",
+        low="아닌 건 아니라고 말함",
+        high="갈등을 피하려 무조건 맞춰줌",
+    ),
+    "ideal_warmth": Dimension(
+        area="ideal",
+        label="신뢰·배려",
+        low="상대의 성실함·배려를 크게 따지지 않음",
+        high="약속을 지키고 남을 배려하는 태도를 최우선으로 봄",
+    ),
+    "ideal_vitality": Dimension(
+        area="ideal",
+        label="매력·활발함",
+        low="외적 매력이나 텐션을 거의 안 봄",
+        high="밝고 활발한 분위기를 중요하게 봄",
+    ),
+    "ideal_status": Dimension(
+        area="ideal",
+        label="능력·안정성",
+        low="조건을 거의 보지 않음",
+        high="직업·경제력 등 안정성을 중요하게 봄",
+    ),
+    "seriousness": Dimension(
+        area="orientation",
+        label="관계 진지도",
+        low="가볍게 알아가기",
+        high="진지하게 오래 만날 사람을 찾는 중",
+    ),
+}
+
+TEXTUAL: dict[str, str] = {
+    "interests": "관심사",
+    "routine": "일상",
+    "date_prefer": "선호 데이트",
+    "date_avoid": "피하고 싶은 것",
+}
+
+ALL_DIMENSIONS: list[str] = [*SCORED.keys(), *TEXTUAL.keys()]
+
+# 차원의 area 를 등장 순서대로 중복 없이. summaries 카드의 category 값 후보.
+AREAS: list[str] = list(dict.fromkeys(d.area for d in SCORED.values()))
+
+
+# ══ 주제 정의 ══════════════════════════════════════════════
+
+
+class Weight(IntEnum):
+    LIGHT = 0
+    MEDIUM = 1
+    HEAVY = 2
+
+
+@dataclass(frozen=True)
+class Topic:
+    id: str
+    weight: Weight
+    intent: str  # LLM에 전달되는 "이번에 알아낼 것"
+    seed: str  # LLM 실패 시 그대로 쓰는 폴백 질문
+    covers: tuple[str, ...]
+    also_touches: tuple[str, ...] = ()
+    choices: tuple[str, ...] | None = None
+    is_closing: bool = False
+    # 하루가 문 여는 한 줄. LLM 에 "참고만" 으로 전달된다.
+    # 연애관 주제는 하루의 입장 대신 제3자 얘기로 — 사용자 답을 유도하지 않기 위해.
+    # 주제 순서가 동적이라 "아까 ~ 얘기" 같은 순서 의존 표현은 쓰지 않는다.
+    opener: str = ""
+
+
+TOPICS: list[Topic] = [
+    Topic(
+        id="interests",
+        weight=Weight.LIGHT,
+        opener="저는 요즘 밤 산책에 빠져있어요.",
+        covers=("interests",),
+        intent="요즘 시간을 많이 쓰는 취미·관심사와 그게 좋은 이유",
+        seed="요즘 시간을 가장 많이 쓰는 취미나 관심사가 뭐예요?",
+    ),
+    Topic(
+        id="weekend",
+        weight=Weight.LIGHT,
+        opener="저같은 경우는 약속 없는 주말이면 베이킹하는 걸 좋아해서 자주 빵을 만들어요.",
+        covers=("routine", "date_prefer", "date_avoid"),
+        intent="약속 없는 주말을 보내는 방식 + 하고 싶은 데이트 하나, 피하고 싶은 것 하나",
+        seed="아무 약속 없는 주말은 보통 어떻게 보내세요?",
+    ),
+    Topic(
+        id="contact",
+        weight=Weight.MEDIUM,
+        opener="주변 보면 연락 스타일이 진짜 갈리더라고요, 하루 종일 톡 하는 사람이랑 할 말 있을 때만 하는 사람.",
+        covers=("contact_rhythm",),
+        also_touches=("avoidance",),
+        intent="연락 빈도 선호 — 수시로 vs 할 말 있을 때",
+        seed="연락은 자주 주고받는 편이 좋아요, 할 말 있을 때가 좋아요?",
+    ),
+    Topic(
+        id="share_vs_separate",
+        weight=Weight.MEDIUM,
+        opener="연애하면 다 같이 하는 커플도 있고 각자 시간 챙기는 커플도 있잖아요.",
+        covers=("avoidance",),
+        also_touches=("disclosure",),
+        intent="연애할 때 공유 중심인지 각자 생활 중심인지",
+        seed="연애하면 웬만한 일은 공유하는 편이에요, 각자 생활이 있는 게 좋아요?",
+    ),
+    Topic(
+        id="hard_times",
+        weight=Weight.MEDIUM,
+        opener="힘든 일 있을 때 바로 말하는 사람도 있고 혼자 정리하고 말하는 사람도 있더라고요.",
+        covers=("disclosure", "openness"),
+        also_touches=("positivity",),
+        intent="힘든 일이나 관계 고민을 바로 말하는지 혼자 정리 후 말하는지",
+        seed="힘든 일이 있을 때 연인에게 바로 말하는 편이에요?",
+    ),
+    Topic(
+        id="slow_reply",
+        weight=Weight.MEDIUM,
+        opener="답장 늦을 때 드는 생각, 다들 한 번씩 겪잖아요.",
+        covers=("anxiety",),
+        also_touches=("contact_rhythm",),
+        intent="상대 반응이 늦거나 미지근할 때 드는 생각",
+        seed="상대 답장이 늦을 때 보통 어떤 생각이 들어요?",
+    ),
+    Topic(
+        id="disagreement",
+        weight=Weight.HEAVY,
+        opener="소개팅에서 이런 거 물어보면 좀 이상한데, 그래서 더 궁금해요.",
+        covers=("problem_solving", "withdrawal", "engagement"),
+        intent="의견이 부딪쳤을 때의 행동 + 최근 사례",
+        seed="연인과 의견이 부딪쳤을 때 보통 어떻게 행동해요?",
+    ),
+    Topic(
+        id="receiving_hurt",
+        weight=Weight.HEAVY,
+        opener="반대 상황도 있잖아요, 상대가 나한테 서운하다고 할 때.",
+        covers=("compliance",),
+        also_touches=("problem_solving", "withdrawal"),
+        intent="상대가 서운함을 표현했을 때의 반응",
+        seed="상대가 서운함을 표현하면 어떻게 반응하는 편이에요?",
+    ),
+    Topic(
+        id="ideal_type",
+        weight=Weight.LIGHT,
+        opener="사람 볼 때 제일 먼저 보게 되는 거, 다들 하나씩 있잖아요.",
+        covers=("ideal_warmth", "ideal_vitality", "ideal_status"),
+        intent="사람 볼 때 먼저 보는 것 + 없으면 안 되는 것 하나",
+        seed="사람을 볼 때 가장 먼저 보게 되는 게 뭐예요?",
+    ),
+    Topic(
+        id="orientation",
+        weight=Weight.LIGHT,
+        is_closing=True,
+        opener="오늘 얘기 재밌었어요. ",
+        covers=("seriousness",),
+        also_touches=("assurances", "openness"),
+        intent="지금 원하는 관계의 온도",
+        seed="지금은 어떤 연애를 하고 싶어요?",
+        choices=("진지하게 만날 사람", "편하게 알아가기", "아직 잘 모르겠어요"),
+    ),
+]
+
+TOPICS_BY_ID = {t.id: t for t in TOPICS}
+
+
+# ══ 보강 질문 은행 ═════════════════════════════════════════
+# 근거가 부족한 차원(confidence LOW/MEDIUM)을 채우는 질문. 차원당 2개, 위에서부터 순서대로 쓴다.
+# 하루 말투. 온보딩 주제와 겹치지 않게, 그 차원만 정확히 겨눈다.
+
+SUPPLEMENTS: dict[str, tuple[str, ...]] = {
+    "avoidance": (
+        "연애 중에도 혼자만의 시간이 꼭 필요한 편이에요, 아니면 같이 있는 게 더 편해요?",
+        "연인이 갑자기 '오늘 저녁에 볼까?' 하면 보통 어떤 마음이 먼저 들어요?",
+    ),
+    "anxiety": (
+        "상대가 평소보다 말이 짧아지면 무슨 생각이 먼저 들어요?",
+        "'우리 괜찮은 거지?' 같은 확인을 하고 싶어질 때가 있어요?",
+    ),
+    "disclosure": (
+        "기분이 안 좋은 날, 연인한테 그걸 티 내는 편이에요 아니면 숨기는 편이에요?",
+        "좋아하는 마음은 말로 표현하는 편이에요, 행동으로 보여주는 편이에요?",
+    ),
+    "openness": (
+        "'우리 요즘 어때?' 같은 얘기, 먼저 꺼내는 편이에요?",
+        "관계에서 불편한 게 생기면 바로 얘기해요, 아니면 좀 지켜봐요?",
+    ),
+    "positivity": (
+        "연인이랑 있을 때 장난이나 농담을 많이 치는 편이에요?",
+        "평소 메시지 톤이 어때요 — 느낌표랑 ㅋㅋ 많이 쓰는 편이에요?",
+    ),
+    "assurances": (
+        "마음에 드는 사람한테 '다음에 또 봐요' 같은 말, 먼저 하는 편이에요?",
+        "'오래 보고 싶다' 같은 얘기를 연애 초반에 하는 편이에요?",
+    ),
+    "contact_rhythm": (
+        "일하는 중에 연인 연락이 오면 바로 답해요, 아니면 모아서 답해요?",
+        "하루에 연락 몇 번 정도가 딱 편해요?",
+    ),
+    "problem_solving": (
+        "다툰 뒤에 '그래서 다음엔 어떻게 할까'까지 얘기하는 편이에요?",
+        "의견이 갈릴 때 중간 지점을 찾으려고 해요, 아니면 한쪽으로 정리해요?",
+    ),
+    "withdrawal": (
+        "감정이 올라올 때 자리를 잠깐 뜨는 편이에요?",
+        "말다툼 중에 입을 닫아버린 적 있어요? 그때 어땠어요?",
+    ),
+    "engagement": (
+        "화가 나면 목소리가 커지는 편이에요?",
+        "다툴 때 하고 싶은 말을 다 쏟아내는 편이에요, 참는 편이에요?",
+    ),
+    "compliance": (
+        "다툼을 빨리 끝내려고 그냥 맞춰준 적 있어요?",
+        "아닌 건 아니라고 말하는 편이에요, 상대 기분 봐서 넘기는 편이에요?",
+    ),
+    "ideal_warmth": (
+        "약속 시간에 자주 늦는 사람, 얼마나 신경 쓰여요?",
+        "직원한테 무례한 사람을 보면 어떤 생각이 들어요?",
+    ),
+    "ideal_vitality": (
+        "조용한 사람이랑 활발한 사람 중에 더 끌리는 쪽이 있어요?",
+        "첫인상에서 외적인 분위기를 얼마나 봐요?",
+    ),
+    "ideal_status": (
+        "상대의 직업이나 경제력, 솔직히 얼마나 봐요?",
+        "'안정적인 사람'이란 말 들으면 뭐가 떠올라요?",
+    ),
+    "seriousness": (
+        "지금 만나면 결혼까지 생각하면서 만나는 편이에요?",
+        "가볍게 시작해서 진지해지는 것도 괜찮아요, 처음부터 진지한 게 좋아요?",
+    ),
+}
+assert set(SUPPLEMENTS) == set(SCORED), "보강 질문은 점수 차원 전부에 있어야 한다"
+
+
+# ══ LLM 출력 검증 ══════════════════════════════════════════
+# 모델이 "높음"이나 120을 뱉는 일이 실제로 생긴다.
+# 매칭 알고리즘에 들어가기 전 경계에서 막는다.
+
+
+class Narrative(BaseModel):
+    """사용자에게 보여주는 서술. 점수와 같은 호출에서 LLM이 쓴다.
+
+    화면에는 이것이 먼저 보이고 점수는 뒤로 간다 — 사용자는 차트가 아니라
+    "○○님은 이런 편이에요"를 읽는다.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    headline: str = Field(max_length=60)  # "독립적이지만 대화가 잘 통하는 관계를 원하는 타입"
+    body: str = Field(max_length=800)  # 3~5문장, "~하는 편이에요" 톤
+    traits: list[str] = Field(default_factory=list, max_length=6)  # 한 줄짜리 특징 3~5개
+
+
+class Summary(BaseModel):
+    """area 하나를 한 장으로 요약한 카드. narrative와 같은 호출에서 LLM이 쓴다.
+
+    category는 AREAS(차원의 area) 중 하나여야 하며, service가 그 밖의 값과
+    중복 category는 걸러낸다 — LLM이 지어낸 카테고리를 그대로 보여주지 않기 위해.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    category: str
+    title: str = Field(max_length=40)
+    content: str = Field(max_length=200)
+
+
+# ══ 실제 대화에서 관찰한 대화 스타일 (persona_extraction 이 채운다) ═══════════
+
+SPEECH_LEVELS = ("존댓말", "반말", "혼용")
+# 실제 대화로 보정하는 점수 — 메신저 대화에서 드러나는 것만. 갈등·이상형·연락 빈도는 대화만으로 판단하기 어렵다
+REFLECTED_SCORES = ("disclosure", "positivity", "openness", "assurances")
+_STYLE_TEXT_MAX = 80
+_STYLE_SUMMARY_MAX = 200
+
+
+class ConversationStyle(BaseModel):
+    """실제 대화 발화에서 뽑은 말투·대화 습관. 모든 필드는 선택 — 근거가 없으면 비워 둔다.
+
+    LLM 이 형식을 조금 어겨도 추출 전체가 실패하지 않게, 검증 대신 정리(before validator)한다."""
+
+    model_config = {"extra": "ignore"}
+
+    # 말투·말버릇
+    speech_level: str | None = None  # 존댓말 | 반말 | 혼용
+    frequent_phrases: list[str] = Field(default_factory=list)  # 실제 문구, 최대 10개 (개인정보는 추출 서비스가 거름)
+    endings: list[str] = Field(default_factory=list)  # 어미 습관: "~요", "~용"
+    interjections: list[str] = Field(default_factory=list)  # 감탄사·추임새: "헐", "오"
+    slang: list[str] = Field(default_factory=list)  # 줄임말·신조어: "ㄹㅇ"
+    phrase_weights: dict[str, float] = Field(
+        default_factory=dict
+    )  # 어미·단어별 수치 가중치 (0.0~1.0, 시간 감쇠 및 퇴출 관리)
+    punctuation: str | None = None  # 문장부호 습관
+    laughter: str | None = None  # 웃음 표현과 빈도
+    # 대화 방식
+    message_length: str | None = None
+    question_rate: str | None = None
+    reaction: str | None = None
+    self_talk: str | None = None
+    humor: str | None = None
+    initiative: str | None = None
+    summary: str | None = None  # 한 줄 요약 1~2문장
+
+    @field_validator("speech_level", mode="before")
+    @classmethod
+    def _known_level(cls, v: object) -> object:
+        return v if v in SPEECH_LEVELS else None
+
+    @field_validator("frequent_phrases", "endings", "interjections", "slang", mode="before")
+    @classmethod
+    def _str_list(cls, v: object) -> list[str]:
+        if not isinstance(v, list):
+            return []
+        return [x.strip() for x in v if isinstance(x, str) and x.strip()]
+
+    @field_validator("phrase_weights", mode="before")
+    @classmethod
+    def _weights_dict(cls, v: object) -> dict[str, float]:
+        if not isinstance(v, dict):
+            return {}
+        out: dict[str, float] = {}
+        for k, val in v.items():
+            if isinstance(k, str) and k.strip():
+                try:
+                    num = float(val)
+                    out[k.strip()] = max(0.0, min(1.0, round(num, 3)))
+                except (ValueError, TypeError):
+                    continue
+        return out
+
+    @field_validator(
+        "punctuation",
+        "laughter",
+        "message_length",
+        "question_rate",
+        "reaction",
+        "self_talk",
+        "humor",
+        "initiative",
+        mode="before",
+    )
+    @classmethod
+    def _short(cls, v: object) -> object:
+        return (v.strip()[:_STYLE_TEXT_MAX] or None) if isinstance(v, str) else None
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _summary(cls, v: object) -> object:
+        return (v.strip()[:_STYLE_SUMMARY_MAX] or None) if isinstance(v, str) else None
+
+
+class StyleExtraction(BaseModel):
+    """StyleAgent 의 원본 출력. 점수는 대화에서 근거를 찾은 것만 — 범위를 벗어나면 그 점수만 버린다."""
+
+    model_config = {"extra": "ignore"}
+
+    style: ConversationStyle = Field(default_factory=ConversationStyle)
+    disclosure: int | None = None
+    positivity: int | None = None
+    openness: int | None = None
+    assurances: int | None = None
+
+    @field_validator(*REFLECTED_SCORES, mode="before")
+    @classmethod
+    def _in_range(cls, v: object) -> object:
+        return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100 else None
+
+
+class RawExtraction(BaseModel):
+    """추출 LLM의 원본 출력. 근거를 못 찾은 차원은 키가 없다."""
+
+    model_config = {"extra": "ignore"}  # 모델이 지어낸 키는 버린다
+
+    avoidance: int | None = Field(default=None, ge=0, le=100)
+    anxiety: int | None = Field(default=None, ge=0, le=100)
+    disclosure: int | None = Field(default=None, ge=0, le=100)
+    openness: int | None = Field(default=None, ge=0, le=100)
+    positivity: int | None = Field(default=None, ge=0, le=100)
+    assurances: int | None = Field(default=None, ge=0, le=100)
+    contact_rhythm: int | None = Field(default=None, ge=0, le=100)
+    problem_solving: int | None = Field(default=None, ge=0, le=100)
+    withdrawal: int | None = Field(default=None, ge=0, le=100)
+    engagement: int | None = Field(default=None, ge=0, le=100)
+    compliance: int | None = Field(default=None, ge=0, le=100)
+    ideal_warmth: int | None = Field(default=None, ge=0, le=100)
+    ideal_vitality: int | None = Field(default=None, ge=0, le=100)
+    ideal_status: int | None = Field(default=None, ge=0, le=100)
+    seriousness: int | None = Field(default=None, ge=0, le=100)
+
+    interests: list[str] = Field(default_factory=list)
+    routine: list[str] = Field(default_factory=list)
+    date_prefer: list[str] = Field(default_factory=list)
+    date_avoid: list[str] = Field(default_factory=list)
+
+    narrative: Narrative | None = None
+    summaries: list[Summary] = Field(default_factory=list)
+
+    @field_validator("summaries", mode="before")
+    @classmethod
+    def _keep_valid_cards(cls, value: object) -> list:
+        """카드는 부가 정보다. 형식을 어긴 카드(길이 초과·필드 누락)는 그 카드만 버린다 —
+        여기서 ValidationError 가 나면 점수·서술까지 추출 전체가 실패해 폴백 초안으로 떨어진다.
+        area 밖·중복 category 정리는 service.valid_summaries 몫."""
+        if not isinstance(value, list):
+            return []
+        kept = []
+        for item in value:
+            try:
+                kept.append(Summary.model_validate(item))
+            except ValidationError:
+                continue
+        return kept
+
+
+class Tags(BaseModel):
+    """턴별 태깅 결과."""
+
+    primary: list[str] = Field(default_factory=list)
+    secondary: list[str] = Field(default_factory=list)
+    off_topic: bool = False
+
+
+# ══ API 입출력 ═════════════════════════════════════════════
+
+
+class StartRequest(BaseModel):
+    # total_turns 같은 알 수 없는 필드는 조용히 무시하지 않고 422로 거절한다
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: str = Field(min_length=1, max_length=20)
+    # 앱 사용자 식별자. 시뮬레이션·연습대화가 "이 사용자의 페르소나"를 찾을 때 쓴다. 로그인 필수라 항상 있어야 한다.
+    user_id: str = Field(min_length=1, max_length=64)
+    # 시작할 때 받아 세션에 둔다 — /confirm 이 오류로 MBTI 없이 와도 확정 페르소나에 옮겨 적기 위해
+    mbti: str | None = Field(default=None, description="16가지 MBTI 중 하나. 대소문자·앞뒤 공백 무관")
+
+    @field_validator("mbti", mode="before")
+    @classmethod
+    def _check_mbti(cls, value: object) -> object:
+        return normalize_mbti(value)
+
+
+MAX_ANSWER_LEN = 200
+RETRY_ANSWER_EMPTY = "조금 더 길게 입력해 주시면 페르소나를 더 정확하게 만들 수 있어요. 다시 답해 주세요."
+RETRY_ANSWER_TOO_LONG = f"답변은 {MAX_ANSWER_LEN}자 이내로 입력해 주세요. 다시 답해 주세요."
+REQUEST_IN_PROGRESS = {"code": "request_in_progress", "message": "이전 요청을 처리하고 있어요. 잠시만 기다려 주세요."}
+TURN_MISMATCH = {"code": "turn_mismatch", "message": "대화 상태가 맞지 않아요. 화면을 새로고침해 주세요."}
+
+
+class AnswerRequest(BaseModel):
+    # 앞뒤 공백을 자른 뒤 1~200자. "네" 같은 한 글자 답도 받는다 — 성의 없는 답은 태깅의 off_topic 으로 따로 대응.
+    # 길이는 여기서 막지 않고 api 가 answer_problem 으로 검사한다 — 422 에 화면에 띄울 안내 문구를 싣기 위해
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    answer: str = Field(description=f"앞뒤 공백을 뺀 1~{MAX_ANSWER_LEN}자. 벗어나면 422 + 안내 문구(detail.message)")
+    # 받은 질문의 turn_index 를 그대로. 이미 지난 턴이면 재전송으로 보고 저장 없이 지금 질문을 돌려준다
+    turn_index: int | None = Field(
+        default=None, ge=0, description="답하는 질문의 turn_index (TurnResponse 에서 받은 값)"
+    )
+
+
+def answer_problem(answer: str) -> dict | None:
+    """답변을 받을 수 없으면 422 detail 로 쓸 {code, message}. 받을 수 있으면 None."""
+    if not answer:
+        return {"code": "answer_empty", "message": RETRY_ANSWER_EMPTY}
+    if len(answer) > MAX_ANSWER_LEN:
+        return {"code": "answer_too_long", "message": RETRY_ANSWER_TOO_LONG}
+    return None
+
+
+# 이 수 이상 답하면 건너뛰기·끝내기가 열린다. 그 밑이면 페르소나가 너무 비어서 의미가 없다.
+MIN_ANSWERS_TO_FINISH = 3
+
+
+# 발화 조각의 종류. 첫 턴은 intro → reason → question → self_disclosure → answer_prompt 고정 순서.
+# 이후 턴은 LLM 자유 발화라 구조를 추측하지 않고 message 하나로, 폴백 질문은 question, 종료는 closing.
+SegmentType = Literal["intro", "reason", "question", "self_disclosure", "answer_prompt", "message", "closing"]
+
+
+class Segment(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)  # 공백만 있는 text 는 min_length 로 거부
+
+    type: SegmentType
+    text: str = Field(min_length=1)
+
+
+class TurnResponse(BaseModel):
+    session_id: str
+    utterance: str  # segments 텍스트를 공백으로 이은 전체 발화. 기존 소비자는 이것만 써도 된다
+    validationResult: ValidationResult | None = None
+    segments: list[Segment] = Field(default_factory=list)
+    choices: list[str] | None = None
+    progress: str
+    done: bool = False
+    answered: int = 0  # 실제로 답한 턴 수 (건너뛴 건 제외)
+    can_skip: bool = False  # 이 질문 건너뛰기 가능
+    can_finish: bool = False  # 여기서 대화 끝내고 바로 페르소나 만들기 가능
+    retry: bool = False  # true 면 답이 질문과 무관해서 같은 질문을 다시 물었다 (턴 소모 없음)
+    # 이 질문의 턴 번호. /answer 요청에 그대로 돌려보내면 재전송된 답이 다음 질문에 잘못 저장되지 않는다
+    turn_index: int = 0
+
+
+# 신뢰도 — 주 근거 건수로. 사용자에게는 등급명이 아니라 CONFIDENCE_LABEL 로 보여준다.
+CONFIDENCE_LOW, CONFIDENCE_MEDIUM, CONFIDENCE_HIGH = "LOW", "MEDIUM", "HIGH"
+CONFIDENCE_LABEL = {
+    CONFIDENCE_LOW: "아직 잘 몰라요",
+    CONFIDENCE_MEDIUM: "어느 정도 알아요",
+    CONFIDENCE_HIGH: "잘 알아요",
+}
+# 정확도 게이지 가중치. "대화할수록 올라가는 숫자" 하나를 만들기 위한 것이지 측정치가 아니다.
+CONFIDENCE_WEIGHT = {CONFIDENCE_LOW: 0.0, CONFIDENCE_MEDIUM: 0.6, CONFIDENCE_HIGH: 1.0}
+
+
+class Gap(BaseModel):
+    """아직 근거가 부족한 차원 + 그걸 채울 다음 보강 질문."""
+
+    dimension: str
+    label: str
+    area: str
+    confidence: str
+    confidence_label: str
+    question: str | None  # 보강 질문을 다 썼으면 None
+
+
+class Change(BaseModel):
+    """이전 버전 대비 달라진 것. kind: score(±10 이상) | confidence(등급 변화)"""
+
+    dimension: str
+    label: str
+    kind: str
+    before: str
+    after: str
+
+
+class PersonaResponse(BaseModel):
+    persona_id: str
+    version: int = 1
+    is_confirmed: bool = False
+    confirmed_at: datetime | None = None
+    mbti: str | None = None
+    source: Literal["llm", "fallback", "practice", "kakao", "reset"] = (
+        "llm"  # practice·kakao 면 대화 추출 버전, reset 은 스타일 삭제
+    )
+    # 근거 없는(직접 답하지 않은) 차원은 null — "모름". 50 으로 채우면 궁합 계산이 "중간"으로 오해한다
+    scores: dict[str, int | None]
+    interests: list[str] = Field(default_factory=list)
+    routine: list[str] = Field(default_factory=list)
+    date_prefer: list[str] = Field(default_factory=list)
+    date_avoid: list[str] = Field(default_factory=list)
+    confidence: dict[str, str] = Field(default_factory=dict)  # {차원: LOW|MEDIUM|HIGH}
+    narrative: Narrative | None = None  # 점수와 모순되면 service 가 None 으로 떨어뜨림
+    summaries: list[Summary] = Field(default_factory=list)  # area별 요약 카드. 최대 len(AREAS)개
+    # 실제 대화에서 관찰한 말투·대화 습관. 추출 전이거나 온보딩으로 재빌드/리셋한 버전이면 None
+    conversation_style: ConversationStyle | None = None
+    accuracy: int = 0  # 0~100. confidence 가중 평균
+    gaps: list[Gap] = Field(default_factory=list)  # LOW 먼저, 그다음 MEDIUM
+    changes: list[Change] = Field(default_factory=list)  # 이전 버전 대비
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+VALID_MBTI = {
+    "ENFJ",
+    "ENFP",
+    "ENTJ",
+    "ENTP",
+    "ESFJ",
+    "ESFP",
+    "ESTJ",
+    "ESTP",
+    "INFJ",
+    "INFP",
+    "INTJ",
+    "INTP",
+    "ISFJ",
+    "ISFP",
+    "ISTJ",
+    "ISTP",
+}
+
+
+def normalize_mbti(value: object) -> object:
+    """대소문자·앞뒤 공백을 정리하고 16가지 유형인지 검사한다. None 은 그대로 (선택 필드)."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip().upper()
+        if value in VALID_MBTI:
+            return value
+    raise ValueError("mbti must be one of the 16 MBTI types")
+
+
+class ConfirmPersonaRequest(BaseModel):
+    """`/build`가 만든 미확정 가치관을 사용자가 승인할 때 받는 값."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    persona_id: str = Field(min_length=1, max_length=32)
+    is_confirmed: Literal[True]
+    # 생략 가능. 없으면 온보딩 시작 때 받은 MBTI 를 쓰고, 그것도 없으면 MBTI 없이 확정한다
+    mbti: str | None = None
+    confirmed_at: datetime
+
+    @field_validator("mbti", mode="before")
+    @classmethod
+    def _check_mbti(cls, value: object) -> object:
+        return normalize_mbti(value)
+
+    @field_validator("confirmed_at")
+    @classmethod
+    def _require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("confirmed_at must include a timezone")
+        return value
+
+
+class ConfirmPersonaResponse(BaseModel):
+    persona_id: str
+    user_id: str
+    is_confirmed: Literal[True]
+    mbti: str | None  # 시작·확정 어디에도 MBTI 가 없었으면 null
+    confirmed_at: datetime
+
+
+class SupplementRequest(BaseModel):
+    dimension: str
+    answer: str = Field(min_length=2, max_length=200)
+
+
+# ══ 다른 기능이 페르소나를 가리킬 때 ═══════════════════════
+# simulation·practice 는 "저장된 페르소나"만 쓴다. 셋 중 하나로 가리키면 최신 버전을 꺼낸다.
+
+
+class PersonaRef(BaseModel):
+    """persona_id(특정 버전) · user_id(그 사용자의 최신) · session_id(그 온보딩의 최신) 중 정확히 하나."""
+
+    persona_id: str | None = Field(default=None, max_length=32)
+    user_id: str | None = Field(default=None, max_length=64)
+    session_id: str | None = Field(default=None, max_length=32)
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> PersonaRef:
+        given = [k for k in ("persona_id", "user_id", "session_id") if getattr(self, k)]
+        if len(given) != 1:
+            raise ValueError("persona_id, user_id, session_id 중 하나만 지정하세요")
+        return self
+
+    def describe(self) -> str:
+        return self.persona_id or self.user_id or self.session_id or "?"
+
+
+class PersonaBrief(BaseModel):
+    """시뮬레이션·연습대화 응답에 실리는 참가자 요약. 점수는 안 보여준다 — 리포트가 따로 있다."""
+
+    persona_id: str
+    user_id: str | None = None
+    nickname: str
+    version: int = 1
+    headline: str | None = None
+    accuracy: int = 0
+
+
+class UpdateNicknameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    user_id: str = Field(min_length=1, max_length=64)
+    nickname: str = Field(min_length=1, max_length=20)
+
+
+class UpdateNicknameResponse(BaseModel):
+    user_id: str
+    nickname: str
+    updated_sessions: int
+    updated_at: datetime

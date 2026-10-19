@@ -1,1 +1,303 @@
-#Title
+# KTB4-17th-AI
+
+별이삼샵 어플리케이션의 AI API 서버입니다. FastAPI 기반으로 구축되었습니다.
+
+## 기술 스택
+
+- Python 3.12
+- FastAPI, Uvicorn
+- SQLAlchemy(asyncio) + asyncpg, Alembic (PostgreSQL)
+- Anthropic SDK (페르소나 LLM)
+- aiosqlite (로컬 플레이그라운드)
+- 패키지 매니저: [uv](https://docs.astral.sh/uv/)
+
+## 사전 준비물
+
+- Python 3.12 이상
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (없다면 아래 방법으로 설치)
+
+  ```bash
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  # Homebrew
+  brew install uv
+  ```
+
+## 시작하기
+
+### 1. 저장소 clone
+
+```bash
+git clone https://github.com/100-hours-a-week/KTB4-17th-AI.git
+cd KTB4-17th-AI
+```
+
+### 2. 가상환경 세팅 및 라이브러리 설치
+
+`uv`는 `pyproject.toml`과 `uv.lock`을 기준으로 가상환경 생성과 의존성 설치를 한 번에 처리합니다.
+
+```bash
+uv sync
+```
+
+- 프로젝트 루트에 `.venv` 디렉터리가 생성되고, `uv.lock`에 고정된 버전으로 의존성이 설치됩니다.
+- 이후 모든 명령은 `uv run <명령어>` 형태로 실행하면 가상환경을 직접 activate 하지 않아도 됩니다.
+- 직접 activate 하려면 아래 명령을 사용하세요.
+
+  ```bash
+  source .venv/bin/activate   # macOS / Linux
+  ```
+
+### 3. 환경 변수 설정
+
+```bash
+cp .env.example .env
+```
+
+`.env` 파일을 열어 키를 채워주세요. 앱 시작 시 `.env`를 읽습니다.
+
+페르소나 온보딩의 프로덕션 LLM은 Anthropic을 사용합니다. 플레이그라운드에서는 요청 헤더 또는 환경 변수로 키를 넘깁니다.
+
+| 변수 | 용도 |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Claude 호출 (프로덕션 `agents.py`, 플레이그라운드 Anthropic 경로) |
+| `GEMINI_API_KEY` | 플레이그라운드 Gemini 경로 |
+| `LLM_PROVIDER` | 플레이그라운드 기본 프로바이더 (`gemini` 또는 `anthropic`) |
+| `DATABASE_URL` | Postgres 접속 (`postgresql+asyncpg://user:pw@host:5432/db`). 비우면 로컬 docker 기본값 |
+| `DB_ECHO` | `1`이면 SQL 로그 출력 |
+
+### 3-1. Postgres 준비
+
+프로덕션 앱(`app.main`)은 Postgres를 씁니다. 로컬에서는 docker로 하나 띄우고 마이그레이션을 적용합니다.
+
+```bash
+docker run -d --name ktb-pg \
+  -e POSTGRES_USER=ktb -e POSTGRES_PASSWORD=ktb -e POSTGRES_DB=ktb \
+  -p 5432:5432 postgres:16
+
+uv run alembic upgrade head
+```
+
+자세한 구조와 마이그레이션 절차는 [docs/postgres.md](docs/postgres.md)를 보세요.
+
+### 4. 서버 실행
+
+엔트리포인트는 `app.main:app`입니다. (`모듈경로:FastAPI 인스턴스 이름`)
+`uvicorn app:main`처럼 쓰면 `app` 패키지에서 `main` 속성을 찾아 실패합니다.
+
+```bash
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+가상환경을 이미 activate 했다면 `uv run` 없이 실행해도 됩니다.
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+서버가 실행되면 아래 주소에서 확인할 수 있습니다.
+
+- API: http://127.0.0.1:8000
+- Swagger UI: http://127.0.0.1:8000/docs
+- ReDoc: http://127.0.0.1:8000/redoc
+
+프로덕션 엔트리포인트의 API prefix는 `/ai/api`입니다.
+
+DB 세션은 `app/core/db.py`의 `get_db`가 제공합니다. Postgres 없이 페르소나 온보딩만 빠르게 돌려보려면 아래 플레이그라운드(SQLite)를 사용하세요.
+
+### 5. 로컬 플레이그라운드
+
+`dev/`는 `app/`을 import만 하고 한 줄도 고치지 않습니다. DB는 SQLite로, LLM은 요청별 키로 바깥에서 갈아끼웁니다. Docker 이미지에는 넣지 않는 전제입니다.
+세 플레이그라운드는 같은 SQLite(`dev/persona/playground.db`)를 씁니다 — 페르소나를 먼저 만들고, 그걸로 시뮬레이션·연습대화를 돌립니다.
+
+```bash
+uv run uvicorn dev.persona.playground:app --reload --port 8000      # 페르소나 온보딩
+uv run uvicorn dev.simulation.playground:app --reload --port 8001   # 시뮬레이션 (페르소나 2개 필요)
+uv run uvicorn dev.practice.playground:app --reload --port 8002     # 연습대화 (페르소나 1개 필요)
+```
+
+- UI: http://127.0.0.1:8000 · 8001 · 8002
+- Swagger UI: http://127.0.0.1:8000/docs
+
+#### 순서대로 돌려보기
+
+1. persona 플레이그라운드 띄우기 (프로젝트 폴더에서)
+
+   ```bash
+   uv run uvicorn dev.persona.playground:app --reload --port 8000
+   ```
+
+2. 브라우저에서 http://localhost:8000 열기
+   - API 키 입력 (Gemini `AIza…` 또는 Anthropic `sk-ant-…`)
+   - 닉네임 입력 → **시작** → 하루와 10번 대화 → 자동으로 `/build` 까지 돌아서 페르소나가 저장됩니다.
+3. 닉네임을 바꿔서 한 번 더 (예: 첫 번째 "은서", 두 번째 "지훈"). 답변을 다르게 하면 성향이 달라서 시뮬레이션 결과가 더 재밌게 나옵니다.
+4. 다른 터미널 탭에서 시뮬레이션·연습대화 띄우기
+
+   ```bash
+   uv run uvicorn dev.simulation.playground:app --reload --port 8001
+   ```
+
+   ```bash
+   uv run uvicorn dev.practice.playground:app --reload --port 8002
+   ```
+
+   - http://localhost:8001 — 나/상대 드롭다운에 방금 만든 두 페르소나가 보이면 **시뮬레이션 실행**
+   - http://localhost:8002 — 상대 페르소나 골라서 **시작** → 상대가 먼저 인사함
+
+하루(온보딩 인터뷰어)는 DB 에 저장되는 페르소나가 아니라 `persona/agents.py` 의 `SYSTEM_PROMPT` 에 고정된 인물이라 따로 만들 필요가 없습니다.
+
+브라우저에서 API 키와 프로바이더를 넣거나, 헤더로 전달할 수 있습니다.
+
+- `X-Api-Key`: Gemini 또는 Anthropic 키
+- `X-Provider`: `gemini` 또는 `anthropic` (키가 `AIza`로 시작하면 Gemini로 추정)
+- `X-Tagging: 0`: 턴별 태깅 LLM 호출을 건너뛰고 주제 기본 커버리지로 폴백
+
+## 현재 구현 범위
+
+| 기능 | 경로 | 상태 |
+| --- | --- | --- |
+| 페르소나 온보딩 | `app/features/persona/` | 구현됨. 소개팅 상대 "하루"와 대화한 뒤 연애 성향 점수를 뽑습니다. |
+| 시뮬레이션 | `app/features/simulation/` | 구현됨. 내 페르소나 × 상대 페르소나가 10턴 대화한 대본 + 매칭 리포트. LLM 1회. |
+| 연습 대화 | `app/features/practice/` | 구현됨. 상대의 저장된 페르소나가 나와 SSE 로 대화합니다. |
+| 대표사진 정면 검사 | `app/features/primary_photo/` | 구현됨. 한 명의 정면 얼굴과 최소 밝기·선명도를 검사합니다. |
+| 대표사진 AI 생성 검사 | `app/features/synthetic_detection/` | 구현됨. Community Forensics ViT + C2PA 로 AI 생성 위험을 판정합니다. |
+| 얼굴 인증 | `app/features/face_verification/` | 구현됨. 4초 정면 영상의 라이브니스를 확인하고 대표사진과 SFace 로 1:1 비교합니다. |
+
+페르소나 온보딩 API (`/ai/api` prefix 기준):
+
+| 메서드 | 경로 | 역할 |
+| --- | --- | --- |
+| POST | `/v1/persona/onboarding/start` | 세션을 만들고 첫 질문을 반환합니다. `user_id` 를 주면 그 사용자의 페르소나로 저장됩니다. `mbti`(선택, 16가지 유형·대소문자 무관)를 함께 보내면 세션에 저장해 두었다가 확정 때 페르소나에 옮겨 적습니다. |
+| POST | `/v1/persona/onboarding/{session_id}/answer` | 답을 받고 다음 질문을 반환합니다. 답은 앞뒤 공백을 뺀 1~200자 — 벗어나면 422 + `detail.message`(화면에 띄울 안내 문구), 질문은 그대로 남습니다. 질문과 무관한 답이면 한 번만 같은 질문을 다시 묻습니다(`retry: true`, 턴 소모 없음). 다시 물어도 무관하면 다음으로 넘어가되 `answered` 에는 세지 않습니다. **중복 방지**: 응답의 `turn_index` 를 요청에 그대로 보내면, 이미 지난 턴의 답(재전송)은 저장 없이 지금 질문을 다시 돌려줍니다. 같은 세션의 요청(답변·건너뛰기·끝내기)을 처리 중이면 기다리지 않고 409 `request_in_progress`. |
+| POST | `/v1/persona/{session_id}/build` | 완료된 대화에서 미확정 가치관 초안을 생성·저장합니다. **사용자가 답변으로 근거를 드러낸 차원만** 담습니다 — 건너뛴 질문·묻지 않은 주제는 LLM 이 짐작해도 버리고, 점수는 `null`(모름), 텍스트 항목은 빈 목록입니다. 추출 LLM 이 실패하면 규칙으로 만든 임시 초안(`source: "fallback"`)을 돌려주고, 다시 부르면 LLM 추출을 재시도합니다. |
+| POST | `/v1/persona/{persona_id}/confirm` | 가치관 초안을 확정하고 같은 페르소나 행에 MBTI를 저장합니다. `mbti` 는 생략 가능 — 없으면 시작 때 받은 MBTI 를 쓰고, 그것도 없으면 MBTI 없이 확정합니다. 시작 때 값과 다르면 409. |
+
+기본 턴 수는 10회(5~15)입니다. 플레이그라운드 UI는 10으로 고정합니다.
+
+`scores` 의 값은 `int | null` 입니다. `null` 은 "그 차원은 답하지 않아서 모름"이고, 50 은 답변에 근거가 있는 진짜 중간값입니다.
+MBTI 는 온보딩 결과(점수·신뢰도)와 궁합 점수에 영향을 주지 않습니다. 시뮬레이션·연습대화에서 페르소나를 연기할 때 **말투 힌트**로만 약하게 쓰입니다 (`app/features/persona/profile.py` 의 `MBTI_TONE`).
+시뮬레이션과 연습대화에서는 확정된 페르소나만 사용할 수 있습니다.
+
+시뮬레이션 API. `POST /v1/simulation` 은 한 줄씩 대화를 만든 뒤, 끝날 때까지 기다렸다가 대본과 리포트를 201로 한 번에 돌려줍니다. 상대는 `partner_user_id` 이고, `turns` 를 생략하면 10왕복입니다.
+
+| 메서드 | 경로 | 역할 |
+| --- | --- | --- |
+| POST | `/v1/simulation` | `{me_user_id, partner_user_id, turns=10}` → 대화가 끝나면 대본과 매칭 리포트. |
+| GET | `/v1/simulation/{id}` | 실행 상태와 저장된 줄. |
+| GET | `/v1/simulation/{id}/report` | 리포트를 한 번 감싼 응답. |
+| GET | `/v1/simulation/{id}/events` | 저장된 줄을 한 줄씩 받는 스트림. |
+| GET | `/v1/simulation?user_id=…` | 내 시뮬레이션 목록. |
+| POST | `/v1/simulation/{id}/resume` | 멈춘 실행을 다시 시작. 202 `{simulation_id}`. |
+
+예전 한 호출 시뮬레이션은 `/v1/simulation_old` 입니다.
+
+연습대화 API:
+
+| 메서드 | 경로 | 역할 |
+| --- | --- | --- |
+| POST | `/v1/practice/start` | `{partner_user_id, me_user_id?, nickname?}` → 세션. |
+| POST | `/v1/practice/{id}/opening` | 상대가 먼저 인사 (SSE). |
+| POST | `/v1/practice/{id}/messages` | `{message}` → 상대 답변 (SSE: `start` → `delta`… → `done` / `error`). |
+| POST | `/v1/practice/{id}/retry` | 답변이 도중에 끊긴 내 마지막 메시지에 답변만 다시 받기 (SSE). 내 메시지는 이미 저장돼 있어 다시 보내지 않습니다. 다시 받을 게 없으면 409. |
+| GET | `/v1/practice/{id}` | 세션 + 전체 메시지. |
+| GET | `/v1/practice?user_id=&limit=` | 내 연습대화 목록 (`me_user_id`로 시작한 세션, 최신순). |
+| POST | `/v1/practice/{id}/opening` · `/messages` · `/retry` | 상대 인사 / 내 메시지 → 답변 / 답변만 다시. 답변을 **모아서 JSON 한 번에**. |
+| POST | `/v1/practice/{id}/opening/stream` · `/messages/stream` · `/retry/stream` | 위 세 개의 **스트리밍(SSE)** 버전. |
+| POST | `/v1/practice/{id}/end` | 세션 닫기. |
+
+연습대화는 `partner_user_id` / `me_user_id` 로, 그 사용자의 최신 확정 페르소나를 가리킵니다.
+상세 설계와 변경 내역은 [docs/simulation-practice.md](docs/simulation-practice.md).
+
+프로필 신뢰(대표사진 심사·얼굴 인증) API — LLM 을 쓰지 않고 로컬 비전 모델만 사용합니다:
+
+| 메서드 | 경로 | 역할 |
+| --- | --- | --- |
+| POST | `/v1/profile-trust/photos/primary/frontal-check` | `image` → 정면·품질 판정과 사유 코드 (`NO_FACE`, `MULTIPLE_FACES`, `NON_FRONTAL_FACE` 등). |
+| POST | `/v1/profile-trust/photos/primary/synthetic-check` | `image` → `CLEAR` / `SYNTHETIC_RISK` / `CONFIRMED_SYNTHETIC`. |
+| POST | `/v1/profile-trust/verifications/challenges` | 서명된 5분짜리 라이브 촬영 챌린지 발급. |
+| POST | `/v1/profile-trust/verifications/complete` | `challenge_token` + `primary_photo` + `live_video` → `VERIFIED` 면 백엔드가 인증 마크를 부여. |
+
+- `INTERNAL_API_KEY` 를 설정하면 이 네 API 는 `X-Internal-Api-Key` 헤더를 요구합니다.
+- 모델 파일은 Git 에 없습니다. 로컬에서는 `uv run python scripts/download_models.py` 로 받고, Docker 이미지는 빌드 때 받습니다.
+- `ENABLE_TEST_UI=true` 면 `GET /test` 에서 브라우저로 세 기능을 시험할 수 있습니다 (기본 꺼짐).
+- 백엔드 연동 계약: [docs/v2docs/backend-api-contract.md](docs/v2docs/backend-api-contract.md), 스키마 [docs/v2docs/openapi.json](docs/v2docs/openapi.json) (`uv run python scripts/export_profile_trust_openapi.py` 로 재생성). 설계 결정은 [docs/v2docs/adr/](docs/v2docs/adr/).
+
+## 개발 도구
+
+### Lint / Format (ruff)
+
+```bash
+uv run ruff format --check . && uv run ruff check .
+```
+
+자동 수정이 필요하면 다음을 사용하세요.
+
+```bash
+uv run ruff format .
+uv run ruff check --fix .
+```
+
+### 의존성 추가
+
+```bash
+uv add <package>          # 실행 의존성 추가
+uv add --dev <package>    # 개발 의존성 추가
+```
+
+## 프로젝트 구조
+
+```
+app/
+├── main.py                 # FastAPI 앱 엔트리포인트 (`/ai/api`)
+├── devtools/               # 프로필 신뢰 브라우저 테스트 페이지 (ENABLE_TEST_UI)
+├── core/
+│   ├── config.py           # 환경 변수 (pydantic-settings)
+│   ├── db.py               # Postgres 엔진·세션, 공통 get_db, 공통 Base
+│   ├── media.py · errors.py · security.py  # 업로드 검증, 비전 API 오류 매핑, 내부 API 키
+└── features/
+    ├── persona/            # AI 페르소나 온보딩·생성
+    │   ├── api.py          # 라우터. 검증·상태코드만
+    │   ├── service.py      # 주제 선택·턴 진행·페르소나 조립
+    │   ├── repository.py   # SQLAlchemy 접근
+    │   ├── models.py       # 세션·턴·페르소나 테이블
+    │   ├── schemas.py      # 차원·주제 카탈로그 + API 모델 + PersonaRef/PersonaBrief
+    │   ├── agents.py       # LLM 호출 (대화/태깅/추출)
+    │   ├── lookup.py       # 다른 기능이 저장된 페르소나를 꺼내는 입구 (PersonaRef → LoadedPersona)
+    │   └── profile.py      # 페르소나 → LLM 프롬프트용 프로필 문장
+    ├── simulation/         # 페르소나 간 대화 시뮬레이션 + 매칭 리포트
+    │   ├── api.py
+    │   ├── service.py      # 페르소나 로드 → 규칙 점수 → LLM 1회(대본+서술) → 조립·저장
+    │   ├── report.py       # 점수 층(규칙) · 리포트 조립
+    │   ├── agents.py       # SimulationAgent(대본+서술 1회)
+    │   ├── repository.py / models.py / schemas.py
+    ├── practice/           # 상대 페르소나와의 연습 대화 (SSE)
+    │   ├── api.py          # SSE 직렬화. DB 세션은 scope="request"
+    │   ├── service.py      # 세션·메시지 저장, 답변 스트리밍, 폴백
+    │   ├── agents.py       # PartnerAgent (스트리밍)
+    │   ├── repository.py / models.py / schemas.py
+    ├── primary_photo/      # 대표사진 정면·품질 검사 (YuNet + LBF)
+    ├── synthetic_detection/ # 대표사진 AI 생성 위험 (ViT ONNX + C2PA)
+    └── face_verification/  # 라이브니스 + 대표사진 1:1 비교 (SFace)
+models/                     # 비전 모델 (scripts/download_models.py 로 내려받음)
+alembic/                    # DB 마이그레이션 (env.py 가 .env 의 DATABASE_URL 사용)
+└── versions/
+dev/                        # 로컬 플레이그라운드 (`app/`을 수정하지 않음)
+├── _shared/                # SQLite·LLM 교체(bind/bind_stream), 앱 뼈대, 페르소나 목록
+├── persona/                # 온보딩 (8000)
+├── simulation/             # 시뮬레이션 (8001)
+└── practice/               # 연습대화 (8002)
+```
+
+레이어 규칙:
+
+- `api.py` — 검증과 상태코드만. 로직은 service.
+- `service.py` — 무슨 주제를 언제 다룰지는 코드가 정합니다.
+- `agents.py` — 어떻게 말할지만 맡습니다. 프롬프트도 여기 있습니다.
+- `repository.py` — service는 SQLAlchemy를 직접 만지지 않습니다.
+- `dev/` — `app/`을 import만 합니다.
+
+## 담당자
+
+- [lena.cho](https://github.com/HyeerinCho)
+- [yuta.jeong](https://github.com/hrunj1230)
