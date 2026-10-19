@@ -13,6 +13,10 @@ jobs:
     permissions:
       contents: read
 
+    defaults:
+      run:
+        working-directory: KTB-AI
+
     steps:
       - name: Check source
         uses: actions/checkout@v7
@@ -22,6 +26,7 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+          cache-dependency-glob: KTB-AI/uv.lock
 
       - name: Install dependencies
         run: uv sync --all-groups --locked # 가상환경에 의존성 설치, 갱신 없으면 기존 의존성 그대로 실행
