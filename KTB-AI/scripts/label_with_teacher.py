@@ -300,9 +300,10 @@ async def label_tag(
     temperature: float,
     usage: Usage,
 ) -> dict:
-    from app.features.persona.agents import TAG_PROMPT
+    from app.features.persona.agents import TAG_PROMPT, tagging_messages
 
-    user = f"질문: {item.question}\n답변: {item.answer}"  # 운영 TaggingAgent 와 같은 입력
+    # 운영 TaggingAgent·파인튜닝 학습 데이터(training/tagging)와 같은 입력
+    user = tagging_messages(item.question, item.answer)[0]["content"]
 
     async def one() -> dict:
         try:

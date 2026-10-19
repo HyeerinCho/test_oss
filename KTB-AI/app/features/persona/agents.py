@@ -16,6 +16,7 @@ import asyncio  # 비동기 작업 표준 라이브러리
 import json  # JSON 문자열 → dict, dict → JSON 문자열 변환
 import logging
 import re
+import time
 from dataclasses import dataclass  # 데이터 클래스를 간단하게 만들어 주는 데코레이터
 from functools import lru_cache
 
@@ -24,7 +25,7 @@ from langfuse.openai import AsyncOpenAI
 from pydantic import ValidationError  # Pydentic으로 데이터 검사 시 형식에 대한 예외처리 라이브러리
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import llm_retry
+from app.core import llm_retry, slm
 from app.core.config import get_settings
 from app.core.guardrail import (
     GuardrailContext,
@@ -77,6 +78,31 @@ class LLMError(Exception):
     """호출 실패. 호출부가 잡아서 템플릿 서술로 폴백한다."""
 
 
+def _record_llm_failure(name: str, model: str, timeout: float, started: float, error: BaseException) -> None:
+    """실패한 LLM 호출의 진단 정보를 로그와 현재 Langfuse span 에 남긴다.
+
+    타임아웃으로 취소된 호출은 Langfuse 에 generation 이 남지 않아서, 어느 모델이 얼마나 걸려
+    끊겼는지 알 수 없었다. 부가 정보라 기록 중 예외가 나도 호출 결과에는 영향을 주지 않는다."""
+    info = {
+        "llm_call": name,
+        "llm_model": model,
+        "llm_timeout_s": timeout,
+        "llm_elapsed_s": round(time.monotonic() - started, 3),
+        "llm_error_type": type(error).__name__,
+    }
+    status_code = getattr(error, "status_code", None)
+    if status_code is not None:
+        info["llm_status_code"] = status_code
+    request_id = getattr(error, "request_id", None)
+    if request_id:
+        info["llm_request_id"] = request_id
+    logger.warning("LLM call failed: %s", info)
+    try:
+        get_client().update_current_span(metadata=info)
+    except Exception:  # noqa: BLE001 - 관측 실패가 폴백 흐름을 깨면 안 된다
+        logger.debug("failed to attach llm failure info to span", exc_info=True)
+
+
 async def _call(
     *,
     system: str,
@@ -85,18 +111,50 @@ async def _call(
     timeout: float,
     name: str = "persona-llm-call",
     metadata: LangfuseMetadata | None = None,
+    use_slm: bool = True,
 ) -> str:
-    """타임아웃·요청 한도·서버 오류·빈 응답이면 llm_retry 규칙대로 다시 보낸다. timeout 은 시도마다."""
-    settings = get_settings()
-    client = _get_client()
+    """타임아웃·요청 한도·서버 오류·빈 응답이면 llm_retry 규칙대로 다시 보낸다. timeout 은 시도마다.
+
+    태깅·추출이고 SLM 이 설정돼 있으면 먼저 SLM 에 한 번만 보내고, 실패하면 재시도 대신
+    메인 LLM 으로 넘긴다 (app/core/slm.py). 메인 LLM 쪽은 원래 재시도 규칙을 그대로 쓴다.
+    """
     payload = [{"role": "system", "content": system}, *messages]
-    total = llm_retry.attempts()
+    route = slm.route_for(name) if use_slm else None
+    if route is not None:
+        try:
+            return await _complete(route.client, route.model, payload, max_tokens, timeout, name, metadata, total=1)
+        except LLMError as e:
+            slm.record_fallback(name, e)
+    return await _complete(
+        _get_client(),
+        get_settings().llm_model,
+        payload,
+        max_tokens,
+        timeout,
+        name,
+        metadata,
+        total=llm_retry.attempts(),
+    )
+
+
+async def _complete(
+    client: AsyncOpenAI,
+    model: str,
+    payload: list[dict],
+    max_tokens: int,
+    timeout: float,
+    name: str,
+    metadata: LangfuseMetadata | None,
+    *,
+    total: int,
+) -> str:
     for attempt in range(1, total + 1):
+        started = time.monotonic()
         try:
             async with asyncio.timeout(timeout):
                 resp = await client.chat.completions.create(
                     name=name,
-                    model=settings.llm_model,
+                    model=model,
                     messages=payload,  # type: ignore[arg-type]
                     max_tokens=max_tokens,
                     metadata=metadata,
@@ -106,6 +164,7 @@ async def _call(
             if attempt < total and llm_retry.is_retryable(e):
                 await _before_retry(name, attempt, error)
                 continue
+            _record_llm_failure(name, model, timeout, started, e)
             raise error from e
 
         text = ""
@@ -143,6 +202,18 @@ async def _before_retry(name: str, attempt: int, error: LLMError) -> None:
 # 함수 호출 시, 이름=값 형태로 전달한 인자들을 함수 내부에서 {'이름': '값'} 구조의 딕셔너리(dictionary)로 묶어서 처리
 async def _call_json(**kwargs) -> dict:
     text = await _call(**kwargs)  # kwargs 딕셔너리를 다시 펼쳐서 _call()에 전달
+    try:
+        return _parse_json(text)
+    except LLMError as e:
+        # SLM 이 JSON 을 깨뜨렸다면 메인 LLM 으로 한 번 더. SLM 을 안 쓰는 호출이면 그대로 실패
+        name = kwargs.get("name", "")
+        if slm.route_for(name) is None:
+            raise
+        slm.record_fallback(name, e)
+        return _parse_json(await _call(**kwargs, use_slm=False))
+
+
+def _parse_json(text: str) -> dict:
     # 코드펜스(```json, ```JSON)나 앞뒤 설명 문장이 붙어 와도 첫 { ~ 마지막 } 만 잘라 파싱한다
     start, end = text.find("{"), text.rfind("}")
     cleaned = text[start : end + 1] if start != -1 and end > start else text.strip()
@@ -542,6 +613,14 @@ class ConversationAgent:  # 대화 생성 담당
 
 # ══ 태깅 ════════════════════════════════════════════════
 
+
+def _tag_definitions() -> str:
+    # 이름만 주면 모델이 영어 키로 뜻을 짐작한다(avoidance 를 갈등 회피로 읽는 식). 양 끝 설명을 같이 준다
+    lines = [f"- {key} ({d.label}): 낮음 = {d.low} / 높음 = {d.high}" for key, d in SCORED.items()]
+    lines += [f"- {key} ({label}): 사용자가 직접 말한 {label}" for key, label in TEXTUAL.items()]
+    return "\n".join(lines)
+
+
 TAG_PROMPT = f"""\
 사용자 답변이 아래 차원 중 무엇에 대한 근거를 제공하는지 판정하세요.
 
@@ -551,11 +630,39 @@ secondary: 간접적으로 추론 가능한 차원
 질문과 무관한 답변이면 둘 다 빈 배열로 두고 off_topic을 true로 하세요.
 점수는 매기지 마세요. 어떤 차원인지만 고릅니다.
 
-차원 목록: {", ".join(ALL_DIMENSIONS)}
+## 차원 정의 — 이름이 아니라 이 정의로만 판단하세요
+{_tag_definitions()}
+
+## 판정 규칙
+- primary 는 답변 속 사용자 자신의 행동·선호가 그 차원의 어느 쪽인지 직접 말해 줄 때만 넣습니다.
+- 질문이 겨눈 차원이라도 답에 근거가 없으면 넣지 않습니다. 모르겠다·기억이 안 난다·농담으로 넘김·한두 마디 대답은
+  primary 를 빈 배열로 둡니다 (질문과 관련은 있으므로 off_topic 은 false).
+- "아직 정하지 않았어요"·"생각해 본 적 없어요"처럼 질문 주제에 대한 자기 상태를 말한 답도 질문에 대한 대답입니다.
+  primary 는 비우되 off_topic 은 false 입니다. off_topic 은 질문과 상관없는 요청·잡담일 때만 true 입니다.
+- 다른 사람(친구·전 연인·상대)의 행동이나 말은 사용자의 근거가 아닙니다.
+- ideal_* 는 상대에게 바라는 점을 말할 때만, 사용자 자신의 성향이 아닙니다.
 
 JSON만 출력하세요. 설명·마크다운 금지.
 {{"primary": [], "secondary": [], "off_topic": false}}
 """
+
+
+def tagging_messages(question: str, answer: str) -> list[dict]:
+    """태깅 호출의 system 을 뺀 메시지. 파인튜닝 학습 데이터(training/tagging)도 이 함수로 만든다.
+
+    학습 때와 서빙 때 입력 형식이 조금이라도 다르면 튜닝한 모델이 제 성능을 못 낸다.
+    """
+    return [{"role": "user", "content": f"질문: {question}\n답변: {answer}"}]
+
+
+def parse_tags(raw: dict) -> Tags:
+    """모델 JSON → Tags. 모델이 없는 차원명을 지어냈을 수 있으므로 걸러낸다."""
+    valid = set(ALL_DIMENSIONS)
+    return Tags(
+        primary=[d for d in raw.get("primary", []) if d in valid],
+        secondary=[d for d in raw.get("secondary", []) if d in valid],
+        off_topic=bool(raw.get("off_topic", False)),
+    )
 
 
 class TaggingAgent:
@@ -579,7 +686,7 @@ class TaggingAgent:
             try:
                 raw = await _call_json(
                     system=TAG_PROMPT,
-                    messages=[{"role": "user", "content": f"질문: {question}\n답변: {answer}"}],
+                    messages=tagging_messages(question, answer),
                     max_tokens=120,
                     timeout=timeout if timeout is not None else get_settings().onboarding_tag_timeout_s,
                     name="persona-tagging",
@@ -593,13 +700,7 @@ class TaggingAgent:
                 )
                 return None
 
-            valid = set(ALL_DIMENSIONS)
-            return Tags(
-                # 모델이 없는 차원명을 지어냈을 수 있으므로 걸러낸다
-                primary=[d for d in raw.get("primary", []) if d in valid],
-                secondary=[d for d in raw.get("secondary", []) if d in valid],
-                off_topic=bool(raw.get("off_topic", False)),
-            )
+            return parse_tags(raw)
 
 
 # ══ 추출 ════════════════════════════════════════════════
@@ -679,15 +780,18 @@ RUBRIC = f"""\
 ## 서술 (narrative) — 사용자가 직접 읽는 글
 점수와 함께, 이 사람이 결과 화면에서 읽을 서술을 씁니다. 차트가 아니라 이 글이 결과입니다.
 - headline: 한 줄. "○○하지만 ○○한 관계를 원하는 타입" 꼴. 40자 이내
-- body: 3~5문장. **문장마다 사용자가 대화에서 실제로 한 말 하나를 옮겨 씁니다.** "~하는 편이에요" 톤의 존댓말.
+- body: 3~5문장. **답변을 따옴표나 말투 그대로 옮기지 말고, 답변들에서 드러난 성향을 요약해 씁니다.**
+  한 문장은 하나의 성향을 말하되, 그 성향이 어떤 답에서 나왔는지 근거가 있어야 합니다. "~하는 편이에요" 톤의 존댓말.
+  사용자가 쓴 욕설·비속어·은어·장난스러운 표현은 그 단어를 쓰지 않고 성향만 중립적인 말로 풀어 씁니다.
   사용자를 "당신"이 아니라 닉네임 없이 주어 생략으로 부릅니다. 점수를 숫자로 언급하지 않습니다.
   답이 적으면 문장 수를 줄이세요. 억지로 3문장을 채우지 않습니다.
-- traits: 한 줄짜리 특징 3~5개. 각 30자 이내. 예: "중요한 일은 혼자 정리한 뒤에 꺼내는 편". 역시 사용자가 한 말에서만.
+- traits: 한 줄짜리 특징 3~5개. 각 30자 이내. 예: "중요한 일은 혼자 정리한 뒤에 꺼내는 편". 역시 답변에서 확인된 성향만, 사용자의 표현이 아니라 요약한 말로.
 - 근거가 없는 차원은 서술하지 않습니다. 점수와 모순되게 쓰지 않습니다.
 - **짐작 금지**: 사용자가 말하지 않은 마음·반응을 추측하지 않습니다.
   "~할 것 같아요", "~하실 수 있겠네요", "~일 수도 있어요", "~듯해요" 같은 어미를 쓰지 않습니다.
-  ✕ "너무 캐묻는 것은 부담스러우실 수 있겠네요" (사용자가 한 말이 아님)
-  ○ "관계는 천천히 알아가고 싶다고 했어요" (사용자가 한 말)
+  ✕ "너무 캐묻는 것은 부담스러우실 수 있겠네요" (답변에서 확인되지 않은 짐작)
+  ✕ "'일단 말 걸어보고 아니면 말지'라고 했어요" (답변을 그대로 인용)
+  ○ "관계는 천천히 알아가는 쪽을 편하게 느껴요" (답변에서 확인된 성향의 요약)
 - 서술은 사용자에게 말을 거는 글이 아닙니다. "~시군요", "~하셨네요" 같은 대화체 반응도 쓰지 않습니다.
 - "회피형", "불안형" 같은 유형명 금지. 평가·조언 금지 ("좋은 분", "고치면 좋겠다" ✕).
 
