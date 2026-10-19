@@ -1,0 +1,73 @@
+# 기존: name: frontend CI
+name: Frontend CI
+
+on:
+  push:
+    branches:
+      - "chore/**"
+
+  pull_request:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  feature_ci:
+    name: Feature CI
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: AI-FE
+
+
+    steps:
+      - name: Check source
+        # 기존: uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        # 기존: uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: AI-FE/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 기존:
+      # - name: Lint
+      #   run: npx @biomejs/biome lint . && npx htmlhint "**/*.html" && npx stylelint "**/*.css"
+      #
+      # - name: Formatter Check
+      #   run: npx @biomejs/biome format .
+      - name: Biome Check
+        # 기존 : run: npm exec --offline -- biome ci .
+        run: npm run lint:biome
+
+      - name: HTML Lint
+        # 기존 : run: npm exec --offline -- htmlhint "**/*.html"
+        run: npm run lint:html
+
+      - name: CSS Lint
+        # 기존 : run: npm exec --offline -- stylelint "**/*.css"
+        run: npm run lint:css
+
+      - name: Type Check
+        run: npm run typecheck
+
+      - name: Dependency Vulnerability Check
+        # 기존: run: npm audit --audit-level=high
+        # GHSA-vfj7-8cjw-p6xm: braces 패치 버전 없음, stylelint(devDependencies) 경유로만 사용. 패치 나오면 allowlist에서 제거
+        run: npx -y audit-ci@7 --high --allowlist GHSA-vfj7-8cjw-p6xm
+
+
+      - name: Build
+        # 기존: run: npm run build --if-present
+        run: npm run build

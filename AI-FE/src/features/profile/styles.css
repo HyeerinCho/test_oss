@@ -1,0 +1,626 @@
+.my-topbar {
+  justify-content: space-between;
+}
+
+.my-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.my-header-actions button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.my-topbar button:where(:focus-visible) {
+  outline: 2px solid var(--purple);
+  outline-offset: 3px;
+}
+
+.my-topbar .icon {
+  width: 21px;
+  height: 21px;
+}
+
+.my-settings-button span {
+  font-family: "Galmuri14", sans-serif;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--purple);
+}
+
+.my-topbar i,
+.notification-open i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: #e96db8;
+  border-radius: 50%;
+}
+
+.my-topbar i {
+  top: 3px;
+  right: 3px;
+}
+
+.my-main {
+  top: 56px;
+  padding: 20px 0;
+}
+
+.my-identity {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 0 16px 22px;
+  padding: 16px 14px;
+  border: 2px solid #655276;
+  background: linear-gradient(135deg, #fff8df 0%, #fffdf4 64%, #f5ead5 100%);
+  box-shadow: 4px 4px 0 #c7b6d8;
+}
+
+.my-identity::before {
+  position: absolute;
+  z-index: 0;
+  inset: 5px;
+  border: 1px dashed #d3c29d;
+  content: "";
+  pointer-events: none;
+}
+
+.my-identity > :not(.my-settings-button) {
+  position: relative;
+  z-index: 1;
+}
+
+.my-identity > .my-settings-button {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--purple);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .my-identity > .my-settings-button:hover {
+    transform: translate(-1px, -1px);
+    background: #efe3fa;
+    box-shadow: none;
+  }
+}
+
+.my-identity-loading {
+  min-height: 128px;
+}
+
+.my-profile-avatar-button {
+  display: block;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.my-profile-avatar-button .person-avatar {
+  display: block;
+}
+
+.my-identity-loading-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.my-profile-skeleton-avatar,
+.my-profile-skeleton {
+  display: block;
+  flex: none;
+  background: linear-gradient(90deg, #eee6f7 25%, #f9f5ff 50%, #eee6f7 75%);
+
+  /* Pulse opacity instead of repainting a moving gradient. */
+  animation: my-profile-skeleton-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.my-profile-skeleton-avatar {
+  width: 88px;
+  height: 88px;
+  border: 1px solid #bda6d0;
+  border-radius: 50%;
+}
+
+.my-profile-skeleton {
+  height: 10px;
+  border: 1px solid #e3d5ef;
+}
+
+.my-profile-skeleton-kicker {
+  width: 92px;
+  height: 8px;
+}
+
+.my-profile-skeleton-name {
+  width: min(150px, 80%);
+  height: 18px;
+}
+
+.my-profile-skeleton-age {
+  width: 44px;
+  height: 10px;
+}
+
+.my-profile-skeleton-region {
+  width: min(116px, 70%);
+  height: 22px;
+  margin-top: 3px;
+}
+
+@keyframes my-profile-skeleton-pulse {
+  to {
+    opacity: 0.56;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .my-profile-skeleton-avatar,
+  .my-profile-skeleton {
+    animation: none;
+  }
+}
+
+.my-identity-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 32px;
+}
+
+.my-profile-kicker {
+  align-self: flex-start;
+  padding: 2px 6px;
+  border: 1px solid #d7b2cc;
+  background: #f8e0ec;
+  color: #705078;
+  font-family: "Galmuri11", sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.my-identity h1 {
+  overflow-wrap: anywhere;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.my-identity .my-profile-age {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.my-profile-region {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 3px 0 0;
+  padding: 4px 7px;
+  border: 1px solid #dfcfaa;
+  background: #fff9eb;
+  color: #6a5875;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.my-profile-region .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.my-profile-message {
+  margin: 0 20px 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.my-menu button {
+  border: 0;
+  border-top: 1px solid #e8ddf2;
+  background: transparent;
+  min-height: 58px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  text-align: left;
+  padding: 10px 22px;
+  font-size: 14px;
+}
+
+:where(.my-menu) button:last-child {
+  border-bottom: 1px solid #e8ddf2;
+}
+
+:where(.my-menu button > span:last-child) {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.menu-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  font-size: 20px;
+}
+
+.my-footer {
+  margin: 40px 0;
+  color: #a69bb2;
+  font-size: 10px;
+  text-align: center;
+}
+
+.settings-main {
+  top: 96px;
+  bottom: 0;
+  padding: 24px 20px;
+}
+
+.settings-intro {
+  margin: 0 2px 22px;
+  padding: 12px 14px 14px;
+  border-left: 3px solid var(--purple);
+  background: linear-gradient(90deg, #f3eaff, #fffdfd 88%);
+}
+
+.settings-kicker {
+  color: #705078;
+  font-family: "Galmuri11", sans-serif;
+  font-size: 11px;
+}
+
+.settings-intro h1 {
+  margin: 7px 0 4px;
+  font-size: 21px;
+}
+
+.settings-intro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-action-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-action {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 76px;
+  gap: 12px;
+  padding: 12px;
+  border: 2px solid #6d5a7c;
+  background: #fffdf7;
+  box-shadow: 3px 4px 0 #cbbbd9;
+  text-align: left;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings-action:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 5px 0 #8758cf38;
+  }
+}
+
+.settings-action:focus-visible,
+.settings-confirm-actions button:where(:focus-visible) {
+  outline: 2px solid var(--purple);
+  outline-offset: 3px;
+}
+
+.settings-action-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 2px solid #6d5a7c;
+  background: #f4ebff;
+  box-shadow: inset -3px -3px 0 #e3d2f4;
+  color: var(--purple);
+  font-family: "Galmuri14", sans-serif;
+  font-size: 23px;
+  line-height: 1;
+}
+
+.logout-action-icon {
+  background: #fbe3f0;
+  color: #9e315f;
+}
+
+.settings-action-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.settings-action-copy strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.settings-action-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.settings-action-chevron {
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.settings-logout {
+  border-color: #7f305b;
+  background: #fffafd;
+}
+
+.persona-trait strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-logout .settings-action-copy strong {
+  color: #8d2b56;
+}
+
+.settings-logout-confirm {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 2px dashed #9e315f;
+  background: #fff7fb;
+  box-shadow: 3px 4px 0 #8758cf26;
+}
+
+.settings-logout-confirm legend {
+  padding: 0;
+  font-size: 14px;
+}
+
+.settings-logout-confirm > p {
+  margin: 6px 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.settings-confirm-actions button {
+  min-height: 40px;
+  padding: 7px 13px;
+  border: 2px solid #38205f;
+  box-shadow: 2px 3px 0 #352a4838;
+  font-size: 12px;
+}
+
+.settings-confirm-cancel {
+  background: var(--paper);
+}
+
+.settings-confirm-submit {
+  background: #f6bde2;
+}
+
+.settings-confirm-actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.profile-load-state,
+.profile-load-error {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.profile-load-state {
+  margin: 32px 0;
+}
+
+.profile-load-error {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  margin: 32px 0;
+}
+
+.profile-load-error p {
+  margin: 0;
+}
+
+.edit-main {
+  top: 96px;
+  bottom: 0;
+  padding: 20px;
+}
+
+.edit-photo-section {
+  margin-bottom: 28px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: #fffdfd;
+}
+
+.edit-photo-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.edit-photo-title {
+  font-size: 15px;
+}
+
+.edit-photo-heading span {
+  color: var(--purple);
+  font-size: 12px;
+}
+
+.edit-photo-section > p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.edit-photo-front-upload {
+  min-height: 150px;
+  margin-top: 16px;
+}
+
+.edit-photo-grid {
+  margin-top: 16px;
+}
+
+.edit-photo-current {
+  cursor: default;
+  touch-action: auto;
+}
+
+.edit-photo-replace-button {
+  min-height: 40px;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--purple);
+  background: #fff7fc;
+  color: var(--purple);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profile-photo-labels {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.edit-photo-grid .profile-photo-labels b {
+  position: static;
+  padding: 3px 5px;
+  background: #2e1949d9;
+  color: #fff;
+  font-size: 10px;
+}
+
+.edit-photo-grid .photo-uploading {
+  top: 5px;
+  right: 32px;
+  bottom: auto;
+}
+
+.edit-photo-help {
+  margin-top: 14px;
+}
+
+.edit-photo-error {
+  margin: 10px 0 0;
+  color: #ba386d;
+}
+
+.edit-actions {
+  margin: 30px 0;
+}
+
+.persona-main,
+.preferences-main {
+  top: 96px;
+  bottom: 0;
+  padding: 24px 20px;
+}
+
+.persona-hero {
+  text-align: center;
+  padding: 18px 20px 30px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.persona-hero .icon {
+  width: 72px;
+  height: 72px;
+}
+
+.persona-hero h1 {
+  font-size: 18px;
+  margin: 16px 0 10px;
+}
+
+.persona-hero p {
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 12px;
+  margin: 0;
+}
+
+.persona-main h2 {
+  margin: 25px 0 15px;
+}
+
+.persona-trait {
+  border-bottom: 1px solid var(--line);
+  padding: 15px 5px;
+}
+
+.persona-trait span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.persona-main > small {
+  display: block;
+  color: var(--muted);
+  margin: 24px 0;
+}
