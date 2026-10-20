@@ -95,9 +95,12 @@ class LivenessAnalyzer:
             source_fps = float(capture.get(cv2.CAP_PROP_FPS))
             if not np.isfinite(source_fps) or source_fps <= 0:
                 source_fps = 0.0
+            # 브라우저 MediaRecorder WebM 은 길이 정보가 없어 프레임 수가 0 이나 음수로 읽힌다.
+            # 그대로 두면 앞 24프레임(약 1초)만 보게 되므로 한 번 훑어 실제 프레임 수를 센다.
+            frame_count = reported_frame_count if reported_frame_count > 1 else _count_frames(handle.name)
             target_indices: set[int] | None = None
-            if reported_frame_count > 1:
-                target_indices = set(_uniform_sample_indices(reported_frame_count))
+            if frame_count > 1:
+                target_indices = set(_uniform_sample_indices(frame_count))
             index = 0
             try:
                 while capture.isOpened():
@@ -170,7 +173,7 @@ class LivenessAnalyzer:
                 required_frontal_face_frames=required_frontal,
                 candidate_frame_count=len(candidate_frames),
                 low_light_enhanced_frames=enhanced,
-                source_frame_count=reported_frame_count if reported_frame_count > 1 else index,
+                source_frame_count=frame_count if frame_count > 1 else index,
                 source_fps=round(source_fps, 3) if source_fps else None,
                 max_abs_yaw_deg=self.max_abs_yaw_deg,
                 max_abs_pitch_deg=self.max_abs_pitch_deg,
@@ -234,6 +237,17 @@ def _frame_diagnostic(
         low_light_enhanced=observation.low_light_enhanced,
         candidate_rank=candidate_rank,
     )
+
+
+def _count_frames(path: str) -> int:
+    capture = cv2.VideoCapture(path)
+    count = 0
+    try:
+        while capture.isOpened() and capture.grab():
+            count += 1
+    finally:
+        capture.release()
+    return count
 
 
 def _uniform_sample_indices(frame_count: int) -> list[int]:

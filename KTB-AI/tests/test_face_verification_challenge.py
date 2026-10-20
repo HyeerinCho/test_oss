@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pytest
 
@@ -99,6 +100,48 @@ def test_fixed_pose_accepts_six_clear_frontal_frames_despite_detection_dropouts(
         ]
         * 12
     )
+
+
+def test_sampling_spans_whole_video_when_frame_count_is_missing(monkeypatch):
+    # MediaRecorder WebM 처럼 길이 정보가 없어 프레임 수가 음수로 읽히는 5초·24fps 영상
+    frames = [np.zeros((64, 64, 3), dtype=np.uint8) for _ in range(120)]
+
+    class FakeCapture:
+        def __init__(self, _path):
+            self.index = 0
+
+        def get(self, prop):
+            return 24.0 if prop == cv2.CAP_PROP_FPS else -2.2e17
+
+        def isOpened(self):
+            return True
+
+        def grab(self):
+            if self.index >= len(frames):
+                return False
+            self.index += 1
+            return True
+
+        def read(self):
+            if not self.grab():
+                return False, None
+            return True, frames[self.index - 1]
+
+        def release(self):
+            pass
+
+    class FakeFaceAnalyzer:
+        def observe(self, _frame, **_kwargs):
+            return observation()
+
+    monkeypatch.setattr("app.features.face_verification.liveness.cv2.VideoCapture", FakeCapture)
+    evaluation = LivenessAnalyzer(FakeFaceAnalyzer()).evaluate(b"video", ".webm", [Challenge.LOOK_STRAIGHT])
+
+    indices = [item.source_frame_index for item in evaluation.result.frame_diagnostics]
+    assert evaluation.result.sampled_frames == 24
+    assert evaluation.result.source_frame_count == 120
+    assert indices == _uniform_sample_indices(120)
+    assert evaluation.result.frame_diagnostics[-1].timestamp_ms == 4958
 
 
 def test_challenge_token_rejects_tampering():
