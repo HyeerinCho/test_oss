@@ -55,7 +55,9 @@ from scripts.generate_synthetic_onboarding import (  # noqa: E402
 )
 
 MANIFEST = "manifest.json"
-PROMPT_VERSION = "subscription-v1"
+PROMPT_VERSION = "subscription-v2"
+# 구독 배치에서는 ㅋ 계열 웃음을 쓰지 않는다. 시드가 ㅋㅋㅋ 를 고르면 웃음 없음으로 바꾸고, 답에 ㅋ 가 있으면 다시 생성한다
+BANNED_LAUGHTER = "ㅋ"
 
 GEM_INSTRUCTIONS = """\
 당신은 소개팅 앱 온보딩에서 AI "하루"와 처음 대화하는 20~30대 사용자를 연기합니다.
@@ -74,6 +76,7 @@ GEM_INSTRUCTIONS = """\
 - 관심사·데이트 목록을 나열하지 않습니다. 그 질문에 맞는 것 한두 개만 꺼냅니다
 - 하루가 AI라는 걸 알고 있지만 굳이 언급하지 않습니다
 - 각 턴의 [답변 방식]을 반드시 따릅니다
+- "ㅋ"로 된 웃음(ㅋㅋ, ㅋㅋㅋ 등)은 어떤 경우에도 쓰지 않습니다. 웃음은 [말투]에 적힌 것만 씁니다
 - 여러 사람이 주어지면 사람마다 따로 연기합니다. 다른 사람의 설정·답을 섞지 않습니다
 
 ## 출력
@@ -116,6 +119,8 @@ def plan_session(run_seed: int, index: int, total_turns: int) -> SessionPlan:
 
     rng = random.Random(f"{run_seed}:{index}")
     profile = sample_profile(rng, seed_id=f"seed-{run_seed}-{index:05d}")
+    if BANNED_LAUGHTER in profile.style.laughter:
+        profile.style.laughter = ""  # rng 는 그대로 써서 나머지 프로필·답변 방식은 API 버전과 같다
     coverage = Coverage()
     used: list[str] = []
     turns: list[PlannedTurn] = []
@@ -260,6 +265,8 @@ def validate(plan: SessionPlan, obj: dict) -> tuple[list[TurnRecord], list[str]]
             return ""
         if len(" ".join(raw.split())) > MAX_ANSWER_LEN:
             issues.append(f"{where}: {MAX_ANSWER_LEN}자 초과")
+        if BANNED_LAUGHTER in raw:
+            issues.append(f"{where}: ㅋ 웃음 사용")
         return clean_answer(raw)
 
     records: list[TurnRecord] = []

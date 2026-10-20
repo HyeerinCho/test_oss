@@ -81,14 +81,14 @@ DATE_AVOID = (
 STYLE_LENGTH = ("단답", "보통", "장문")
 LENGTH_GUIDE = {"단답": "한 문장, 30자 안팎", "보통": "두세 문장, 50~100자", "장문": "서너 문장, 100~170자"}
 STYLE_SPEECH = ("존댓말", "반말", "혼용")
-STYLE_LAUGHTER = ("", "ㅎㅎ", "ㅋㅋ")
+STYLE_LAUGHTER = ("", "ㅎㅎ", "ㅋㅋㅋ")
 
 
 @dataclass
 class AnswerStyle:
     length: str  # 단답 | 보통 | 장문
     speech: str  # 존댓말 | 반말 | 혼용
-    laughter: str  # "" | ㅎㅎ | ㅋㅋ
+    laughter: str  # "" | ㅎㅎ | ㅋㅋㅋ
     typos: bool
     # 턴마다 이 확률로 답하는 방식이 바뀐다. 코드가 정하므로 "의도한 무관 답변" 같은 정답을 남길 수 있다
     off_topic_rate: float

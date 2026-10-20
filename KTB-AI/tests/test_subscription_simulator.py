@@ -13,6 +13,7 @@ from scripts.subscription_simulator import (
     plan_session,
     render_session,
     session_id,
+    validate,
 )
 
 
@@ -22,7 +23,7 @@ def _fake_response(plan, *, skip_turn: int | None = None, long_turn: int | None 
         n = t.turn_index + 1
         if n == skip_turn:
             continue
-        answer = "가" * (MAX_ANSWER_LEN + 1) if n == long_turn else f"{plan.session_id} 턴{n} 답이에요 ㅋㅋ"
+        answer = "가" * (MAX_ANSWER_LEN + 1) if n == long_turn else f"{plan.session_id} 턴{n} 답이에요 ㅎㅎ"
         turn = {"turn": n, "answer": answer}
         if t.mode == "off_topic":
             turn["off_topic_answer"] = f"{plan.session_id} 턴{n} 아 배고프다"
@@ -42,6 +43,8 @@ def test_plan_matches_api_generator_for_same_seed():
         result = asyncio.run(
             run_session(profile, rng=rng, ask=seed_question, simulator=FakeSimulator(), total_turns=10)
         )
+        if "ㅋ" in profile.style.laughter:
+            profile.style.laughter = ""
         assert plan.profile == profile
         assert [(t.topic.id, t.mode) for t in plan.turns] == [(t.topicId, t.mode) for t in result.turns]
 
@@ -115,3 +118,15 @@ def test_export_refuses_to_overwrite_run(tmp_path):
     out_dir = tmp_path / "run"
     assert main(["export", "--n", "1", "--out-dir", str(out_dir)]) == 0
     assert main(["export", "--n", "1", "--out-dir", str(out_dir)]) == 1
+
+
+def test_k_laughter_is_removed_from_prompt_and_rejected_in_answers():
+    index = next(i for i in range(200) if "ㅋ" in sample_profile(random.Random(f"0:{i}"), seed_id="s").style.laughter)
+    plan = plan_session(0, index, 10)
+    assert plan.profile.style.laughter == ""
+    assert "ㅋ" not in render_session(plan)
+
+    response = _fake_response(plan)
+    response["turns"][0]["answer"] = "테니스 치는 게 제일 재밌어 ㅋㅋㅋ"
+    _, issues = validate(plan, response)
+    assert issues == ["턴 1: ㅋ 웃음 사용"]
