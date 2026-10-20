@@ -57,6 +57,18 @@ uv run python training/tagging/from_teacher.py data/teacher/run1/tagging.jsonl -
 uv run python training/tagging/build_sft.py data/tagging.jsonl --allow-unreviewed   # 검수 전에는 시험용으로만
 ```
 
+시뮬레이터를 API 대신 Gemini 구독(Gem)으로 돌릴 때는 `scripts/subscription_simulator.py` 로 세션별 프롬프트를 내보내고,
+받은 답을 같은 `sessions.jsonl` 형식으로 읽어 들인다. 같은 `--seed` 면 API 버전과 프로필·답변 방식·주제 순서가 같다.
+질문은 시드 질문이고, 한 메시지에 모든 턴이 보여 성향이 섞일 수 있으니 파일럿(40세션)에서 구간 일치율부터 확인한다.
+
+```bash
+uv run python scripts/subscription_simulator.py export --n 40 --seed 0 --out-dir data/synthetic/sub-pilot40
+# gem_instructions.txt → Gem 지침, prompts/*.txt → 붙여넣기, 답은 responses/*.txt 로 저장
+uv run python scripts/subscription_simulator.py import --dir data/synthetic/sub-pilot40   # → sessions.jsonl · .retry.txt
+uv run python scripts/subscription_simulator.py export --out-dir data/synthetic/sub-pilot40 \
+    --only data/synthetic/sub-pilot40/sessions.retry.txt                                   # 다시 할 세션만
+```
+
 teacher 라벨은 `reviewed_by` 가 비어 있어 사람이 확인하기 전에는 학습에 들어가지 않는다. 검수는 5회 샘플 판정 일치율
 (`aggregate.agreement`)이 낮은 것부터 본다. teacher 자체의 골드셋 점수는 `scripts/score_teacher_gold.py` 로 잰다.
 
