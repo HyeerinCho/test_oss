@@ -141,6 +141,25 @@ def test_v2_focus_section_by_level():
         assert key not in text
 
 
+def test_v2_focus_section_without_scored_dims_answers_from_facts():
+    from scripts.generate_synthetic_onboarding import focus_section
+
+    profile = sample_profile(random.Random("0:0"), seed_id="s")
+    profile.levels = dict.fromkeys(SCORED, "unanswered")
+    for topic_id in ("interests", "weekend"):
+        topic = TOPICS_BY_ID[topic_id]
+        dims = [*topic.covers, *topic.also_touches]
+        assert not any(d in SCORED for d in dims)
+        text = focus_section(profile, dims)
+        assert "잘 모르" not in text and "짧게만" not in text
+        assert "[나라는 사람]" in text and "한두 개" in text
+
+    # 점수 차원이 있고 전부 잘 모름일 때만 "모두 잘 모름" 안내가 붙는다
+    assert "모두 잘 모르는" in focus_section(profile, ["avoidance", "interests"])
+    profile.levels["avoidance"] = "high"
+    assert "모두 잘 모르는" not in focus_section(profile, ["avoidance", "interests"])
+
+
 def test_v2_system_prompt_hides_dimension_levels():
     from scripts.generate_synthetic_onboarding import UserSimulator
 

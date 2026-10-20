@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATOR_VERSION = "synthetic-onboarding/2.1"
+GENERATOR_VERSION = "synthetic-onboarding/2.2"
 SCHEMA_VERSION = 1
 DEFAULT_OUT = ROOT / "data" / "synthetic" / "onboarding_sessions.jsonl"
 DEFAULT_SIM_MODEL = "google/gemini-3.8-flash"
@@ -290,6 +290,16 @@ def unknown_style(profile: SeedProfile, dim: str) -> str:
 def focus_section(profile: SeedProfile, dims: list[str]) -> str:
     """이번 질문이 겨누는 차원의 내 성향 — 수준별 행동 예시와 "잘 모름"이면 대답 방식까지."""
     from app.features.persona.schemas import SCORED
+
+    if not any(dim in SCORED for dim in dims):
+        # 관심사·주말처럼 점수 차원이 없는 토픽 — "모두 잘 모름"으로 짧게 답하라고 하면 안 된다
+        return "\n".join(
+            [
+                "[이번 질문과 관련된 나] — 이번 질문은 성향이 아니라 관심사·일상·데이트에 관한 것",
+                "[나라는 사람]의 관심사·일상·데이트 중 이번 질문과 관련된 것 한두 개를 골라 내 경험처럼 답하세요.",
+                "연애 성향(연락·갈등·이상형 등)은 이번 답에서 꺼내지 마세요.",
+            ]
+        )
 
     lines = ["[이번 질문과 관련된 내 성향] — 이 내용과 어긋나지 않게 답하세요"]
     for dim in dims:
