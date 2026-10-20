@@ -33,6 +33,8 @@
 | Kanana + QLoRA | | | | | | | | | | |
 
 - 이전 기준선(10/12, 옛 TAG_PROMPT `23e8e610`): Gemini 2.5 flash-lite 완전 일치 23.4%, primary 29.8%. 프롬프트가 바뀌어 다시 잰다.
+- 서빙 환경(Kanana 행): RunPod **RTX PRO 4000**(24GB), vLLM 0.30.0, `gpu-memory-utilization 0.90` → 가중치 등 6.8 GiB · KV 캐시 13.47 GiB
+  (약 11만 토큰, 4,096 토큰 요청 약 26건 동시), greedy. 지연·건당 비용은 GPU 에 따라 달라지므로 GPU 를 바꾸면 이 줄과 함께 다시 잰다.
 
 ### 배포 게이트 (docs/성능평가 02_F2 · 03_F3 5절)
 
