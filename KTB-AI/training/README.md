@@ -69,6 +69,14 @@ uv run python scripts/subscription_simulator.py export --out-dir data/synthetic/
     --only data/synthetic/sub-pilot40/sessions.retry.txt                                   # 다시 할 세션만
 ```
 
+받은 세션의 질문은 시드 질문이다. `scripts/rewrite_questions.py` 가 턴마다 그때까지의 대화를 넣어 운영 `ConversationAgent`(LLM_* 설정)로
+질문을 다시 쓴다. 답·주제·답변 방식은 그대로이고 원래 질문은 `turns[].seedQuestion` 에 남는다. teacher 라벨링은 다시 쓴 파일로 한다.
+
+```bash
+uv run python scripts/rewrite_questions.py data/synthetic/sub-pilot40/sessions.jsonl --limit 1   # 1세션 시험
+uv run python scripts/rewrite_questions.py data/synthetic/sub-pilot40/sessions.jsonl --resume    # → sessions.rewritten.jsonl
+```
+
 teacher 라벨은 `reviewed_by` 가 비어 있어 사람이 확인하기 전에는 학습에 들어가지 않는다. 검수는 5회 샘플 판정 일치율
 (`aggregate.agreement`)이 낮은 것부터 본다. teacher 자체의 골드셋 점수는 `scripts/score_teacher_gold.py` 로 잰다.
 
